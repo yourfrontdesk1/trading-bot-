@@ -1,7 +1,7 @@
 // Trading Bot SPA — fetches the JSON API and renders each view.
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const TITLES = {overview: "Overview", stocks: "Stocks", predictions: "Predictions", lab: "Strategy Lab"};
+const TITLES = {overview: "Overview", trades: "Trades", stocks: "Stocks", predictions: "Predictions", lab: "Strategy Lab"};
 
 async function get(path) {
   try { const r = await fetch(path); return await r.json(); }
@@ -55,13 +55,42 @@ async function loadStocks() {
   ).join("") : `<tr><td colspan=4 style="color:var(--muted)">no open positions</td></tr>`;
 }
 
+async function loadTrades() {
+  const t = await get("/api/trades");
+  const cards = $("#trades-cards"), empty = $("#trades-empty");
+  if ((t.positions || []).length === 0) {
+    cards.innerHTML = "";
+    empty.style.display = "block";
+    empty.innerHTML = t.dry_run
+      ? "Nothing is being traded yet. The bot is in <b>dry-run</b> (safety on) and every signal is currently <b>hold</b>, so no positions exist. Turn off dry-run or place a trade and it appears here with entry price, time, and reason."
+      : "No open positions right now.";
+  } else {
+    empty.style.display = "none";
+    cards.innerHTML = t.positions.map(p => {
+      const up = p.pl >= 0;
+      return `<div class="trade-card">
+        <div class="sym">${p.symbol}</div>
+        <div class="meta"><b>${p.qty}</b> shares · entry <b>$${p.entry}</b> · now <b>$${p.price}</b>
+          <div class="why">why: strategy entry signal</div></div>
+        <div class="pl ${up ? "pos-up" : "pos-down"}">${up ? "+" : ""}$${p.pl}<br>
+          <span style="font-size:12px">${up ? "+" : ""}${p.pl_pct}%</span></div>
+      </div>`;
+    }).join("");
+  }
+  $("#orders-table tbody").innerHTML = (t.orders || []).length ? t.orders.map(o =>
+    `<tr><td>${o.symbol}</td><td class="${o.side}">${o.side.toUpperCase()}</td><td>${o.qty}</td>
+     <td><span class="badge ${o.status}">${o.status}</span></td><td>${o.submitted}</td>
+     <td>${o.filled_price ? "$" + o.filled_price : "—"}</td></tr>`
+  ).join("") : `<tr><td colspan=6 style="color:var(--muted)">no orders yet</td></tr>`;
+}
+
 async function loadPredictions() {
   const p = await get("/api/polymarket");
   $("#ls-table tbody").innerHTML = (p.longshots || []).map(r =>
-    `<tr><td>${r.q}</td><td>${r.outcome}</td><td>${r.prob}</td></tr>`
+    `<tr><td><a class="mkt" href="${r.url}" target="_blank">${r.q}</a></td><td>${r.outcome}</td><td>${r.prob}</td></tr>`
   ).join("") || `<tr><td colspan=3 style="color:var(--muted)">none flagged</td></tr>`;
   $("#top-table tbody").innerHTML = (p.top || []).map(r =>
-    `<tr><td>${r.q}</td><td>$${Number(r.vol).toLocaleString()}</td>
+    `<tr><td><a class="mkt" href="${r.url}" target="_blank">${r.q}</a></td><td>$${Number(r.vol).toLocaleString()}</td>
      <td>${r.pairs.map(x => x[0] + " " + x[1]).join(" / ")}</td></tr>`
   ).join("") || `<tr><td colspan=3>${p.error || "no data"}</td></tr>`;
 }
@@ -76,7 +105,7 @@ async function loadLab() {
   ).join("");
 }
 
-const LOADERS = {overview: loadOverview, stocks: loadStocks, predictions: loadPredictions, lab: loadLab};
+const LOADERS = {overview: loadOverview, trades: loadTrades, stocks: loadStocks, predictions: loadPredictions, lab: loadLab};
 let current = "overview";
 
 function show(view) {

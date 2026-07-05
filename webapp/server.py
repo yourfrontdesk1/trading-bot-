@@ -95,6 +95,15 @@ def api_positions():
         return {"error": str(e)[:80], "rows": []}
 
 
+def _poly_url(m):
+    ev = m.get("events")
+    slug = None
+    if isinstance(ev, list) and ev:
+        slug = ev[0].get("slug")
+    slug = slug or m.get("slug")
+    return f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com"
+
+
 def api_polymarket():
     try:
         p = PolymarketClient()
@@ -105,15 +114,51 @@ def api_polymarket():
             if not pairs:
                 continue
             q = (m.get("question") or "?")[:90]
+            url = _poly_url(m)
             vol = float(m.get("volume") or 0)
-            top.append({"q": q, "vol": round(vol), "pairs": pairs[:2]})
+            top.append({"q": q, "vol": round(vol), "pairs": pairs[:2], "url": url})
             outcome, prob = min(pairs, key=lambda op: op[1])
             if prob < 0.10:
-                longshots.append({"q": q, "outcome": outcome, "prob": round(prob, 3)})
+                longshots.append({"q": q, "outcome": outcome, "prob": round(prob, 3), "url": url})
         top.sort(key=lambda x: x["vol"], reverse=True)
         return {"longshots": longshots[:12], "top": top[:10]}
     except Exception as e:
         return {"error": str(e)[:80], "longshots": [], "top": []}
+
+
+def api_trades():
+    """Real trades from the Alpaca account: open positions (with entry price/time)
+    and recent orders (with status). This mirrors exactly what IS being traded."""
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        a = alpaca()
+        positions = []
+        for p in a.trading.get_all_positions():
+            positions.append({
+                "symbol": p.symbol, "qty": p.qty,
+                "entry": round(float(p.avg_entry_price), 2),
+                "price": round(float(p.current_price), 2),
+                "value": round(float(p.market_value), 2),
+                "pl": round(float(p.unrealized_pl), 2),
+                "pl_pct": round(float(p.unrealized_plpc) * 100, 2),
+            })
+        orders = []
+        try:
+            req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=25)
+            for o in a.trading.get_orders(req):
+                orders.append({
+                    "symbol": o.symbol, "side": str(o.side).split(".")[-1].lower(),
+                    "qty": str(o.qty), "status": str(o.status).split(".")[-1].lower(),
+                    "submitted": str(o.submitted_at)[:19] if o.submitted_at else "",
+                    "filled_price": round(float(o.filled_avg_price), 2) if o.filled_avg_price else None,
+                })
+        except Exception:
+            pass
+        return {"positions": positions, "orders": orders,
+                "dry_run": config.DRY_RUN, "count": len(positions) + len(orders)}
+    except Exception as e:
+        return {"error": str(e)[:100], "positions": [], "orders": []}
 
 
 def api_strategies():
@@ -126,6 +171,7 @@ ROUTES = {
     "/api/positions": api_positions,
     "/api/polymarket": api_polymarket,
     "/api/strategies": api_strategies,
+    "/api/trades": api_trades,
 }
 
 

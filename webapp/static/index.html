@@ -11,6 +11,7 @@
   <nav class="sidebar">
     <div class="brand">🤖 <span>Trading Bot</span></div>
     <a data-view="overview" class="active">Overview</a>
+    <a data-view="trades">Trades</a>
     <a data-view="stocks">Stocks</a>
     <a data-view="predictions">Predictions</a>
     <a data-view="lab">Strategy Lab</a>
@@ -38,6 +39,19 @@
       <div class="panel"><h2>The one lesson from testing</h2>
         <p class="note">Across 7 years of real data, no timing strategy beat simply buying and holding. The bot's edge isn't clever timing — it's discipline, risk control, and (next) an information edge via the agentic API.</p>
         <div id="mini-chart"></div>
+      </div>
+    </section>
+
+    <!-- TRADES -->
+    <section id="trades" class="view">
+      <div class="panel">
+        <h2>What we're actually holding</h2>
+        <div id="trades-empty" class="note" style="display:none"></div>
+        <div id="trades-cards"></div>
+      </div>
+      <div class="panel">
+        <h2>Recent orders (when we bought)</h2>
+        <table id="orders-table"><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Status</th><th>Submitted</th><th>Fill price</th></tr></thead><tbody></tbody></table>
       </div>
     </section>
 
