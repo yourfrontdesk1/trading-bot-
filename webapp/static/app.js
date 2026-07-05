@@ -118,19 +118,27 @@ async function loadTrades() {
   if ((t.positions || []).length === 0) {
     cards.innerHTML = "";
     empty.style.display = "block";
+    empty.className = "empty-state";
     empty.innerHTML = t.dry_run
-      ? "Nothing is being traded yet. The bot is in <b>dry-run</b> (safety on) and every signal is currently <b>hold</b>, so no positions exist. Turn off dry-run or place a trade and it appears here with entry price, time, and reason."
-      : "No open positions right now.";
+      ? `<div class="ico">🛡️</div><b>No open positions — safety is on</b>
+         <div style="margin-top:8px;max-width:520px;margin-inline:auto">The bot is in <b>dry-run</b> and every signal is currently <b>hold</b>, so nothing has been bought.
+         The moment a trade fires (or you switch off dry-run), it lands here as a live card with entry, current price, and P/L.</div>`
+      : `<div class="ico">💤</div><b>No open positions right now.</b>`;
   } else {
     empty.style.display = "none";
     cards.innerHTML = t.positions.map(p => {
       const up = p.pl >= 0;
-      return `<div class="trade-card">
-        <div class="sym">${p.symbol}</div>
-        <div class="meta"><b>${p.qty}</b> shares · entry <b>$${p.entry}</b> · now <b>$${p.price}</b>
-          <div class="why">why: strategy entry signal</div></div>
-        <div class="pl ${up ? "pos-up" : "pos-down"}">${up ? "+" : ""}$${p.pl}<br>
-          <span style="font-size:12px">${up ? "+" : ""}${p.pl_pct}%</span></div>
+      return `<div class="trade-card ${up ? "win" : "lose"}">
+        <div class="thead">
+          <div><div class="sym">${p.symbol}</div><div class="qty">${p.qty} shares held</div></div>
+          <div class="pl ${up ? "pos-up" : "pos-down"}">${up ? "+" : ""}$${p.pl}
+            <span class="pct">${up ? "+" : ""}${p.pl_pct}%</span></div>
+        </div>
+        <div class="levels">
+          <div class="lv"><div class="k">Entry</div><div class="v">$${p.entry}</div></div>
+          <div class="lv"><div class="k">Now</div><div class="v">$${p.price}</div></div>
+          <div class="lv"><div class="k">Value</div><div class="v">$${Number(p.value).toLocaleString()}</div></div>
+        </div>
       </div>`;
     }).join("");
   }

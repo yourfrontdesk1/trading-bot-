@@ -53,14 +53,23 @@ td.sell{color:var(--red);font-weight:700}
 td.hold{color:var(--muted)}
 .pos-up{color:var(--green)} .pos-down{color:var(--red)}
 
-/* trade cards */
-.trade-card{display:flex;align-items:center;gap:18px;background:var(--panel2);
-  border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin-bottom:10px}
-.trade-card .sym{font-size:18px;font-weight:700;width:70px}
-.trade-card .meta{flex:1;color:var(--muted);font-size:13px}
-.trade-card .meta b{color:var(--txt)}
-.trade-card .why{background:var(--panel);border-radius:6px;padding:4px 10px;font-size:12px;color:var(--amber)}
-.trade-card .pl{font-size:18px;font-weight:700;width:110px;text-align:right}
+/* trade / position cards */
+.pos-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+@media(max-width:760px){.pos-grid{grid-template-columns:1fr}}
+.trade-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.trade-card.win{border-color:#1f5a3a} .trade-card.lose{border-color:#5a1f1f}
+.trade-card .thead{display:flex;justify-content:space-between;align-items:flex-start}
+.trade-card .sym{font-size:22px;font-weight:800}
+.trade-card .qty{color:var(--muted);font-size:12px}
+.trade-card .pl{font-size:24px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums}
+.trade-card .pl .pct{font-size:13px;display:block}
+.trade-card .levels{display:flex;gap:8px;margin-top:14px}
+.trade-card .lv{flex:1;text-align:center;background:rgba(0,0,0,.25);border-radius:8px;padding:10px}
+.trade-card .lv .k{color:var(--muted);font-size:10px;text-transform:uppercase}
+.trade-card .lv .v{font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.empty-state{border:1px dashed var(--line);border-radius:12px;padding:28px;text-align:center;color:var(--muted)}
+.empty-state .ico{font-size:34px;margin-bottom:10px}
+.empty-state b{color:var(--txt)}
 a.mkt{color:var(--accent);text-decoration:none}
 a.mkt:hover{text-decoration:underline}
 .badge{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--panel2);color:var(--muted);text-transform:uppercase}
