@@ -13,7 +13,8 @@
     <a data-view="overview" class="active">Overview</a>
     <a data-view="trades">Trades</a>
     <a data-view="stocks">Stocks</a>
-    <a data-view="predictions">Predictions</a>
+    <a data-view="predictions">Weather edge</a>
+    <a data-view="markets">All markets</a>
     <a data-view="lab">Strategy Lab</a>
     <div class="foot">
       <div id="status-dot" class="dot"></div>
@@ -71,6 +72,16 @@
       <div id="pick-cards"></div>
       <div class="edge-head" style="margin-top:26px">👀 On the watchlist <span class="muted">(edge too small or not maker-fittable yet)</span></div>
       <div id="watch-cards"></div>
+    </section>
+
+    <!-- ALL MARKETS -->
+    <section id="markets" class="view">
+      <div class="mkt-search">
+        <input id="mkt-q" type="text" placeholder="Search all of Polymarket — elections, sports, crypto, World Cup…">
+        <button id="mkt-go">Search</button>
+      </div>
+      <div id="mkt-sub" class="muted" style="margin-bottom:12px"></div>
+      <div id="mkt-cards"></div>
     </section>
 
     <!-- LAB -->

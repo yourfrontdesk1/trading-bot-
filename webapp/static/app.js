@@ -1,7 +1,7 @@
 // Trading Bot SPA — fetches the JSON API and renders each view.
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const TITLES = {overview: "Overview", trades: "Trades", stocks: "Stocks", predictions: "Predictions", lab: "Strategy Lab"};
+const TITLES = {overview: "Overview", trades: "Trades", stocks: "Stocks", predictions: "Weather edge", markets: "All markets", lab: "Strategy Lab"};
 
 async function get(path) {
   try { const r = await fetch(path); return await r.json(); }
@@ -272,7 +272,33 @@ async function loadLab() {
   ).join("");
 }
 
-const LOADERS = {overview: loadOverview, trades: loadTrades, stocks: loadStocks, predictions: loadPredictions, lab: loadLab};
+function marketCard(m) {
+  const odds = (m.pairs || []).map(p => `<span class="oc">${p[0]} <b>${Math.round(p[1] * 100)}%</b></span>`).join("");
+  return `<div class="mkt">
+    <div class="mq"><a class="mkt" href="${m.url}" target="_blank" style="color:inherit;text-decoration:none">${m.question}</a></div>
+    <div class="mmeta">${m.category ? `<span class="mcat">${m.category}</span>` : ""}
+      <span>vol $${Number(m.volume).toLocaleString()}</span>${m.end ? `<span>ends ${m.end}</span>` : ""}</div>
+    <div class="odds">${odds}</div>
+    <button class="ai-btn" onclick="runAgent('${attr(m.question)}','prediction','${attr('Market odds: ' + (m.pairs || []).map(p => p[0] + ' ' + Math.round(p[1] * 100) + '%').join(', ') + '.')}', this)">🧠 Ask the AI analyst</button>
+    <div class="ai-out"></div>
+  </div>`;
+}
+
+let mktLoaded = false;
+async function loadMarkets(force) {
+  if (mktLoaded && !force) return;
+  mktLoaded = true;
+  const cards = $("#mkt-cards");
+  cards.className = "mkt-grid";
+  cards.innerHTML = `<div class="muted">loading Polymarket…</div>`;
+  const q = ($("#mkt-q").value || "").trim();
+  const d = await get("/api/markets" + (q ? "?q=" + encodeURIComponent(q) : ""));
+  if (d.error) { cards.innerHTML = `<div class="muted">${d.error}</div>`; return; }
+  $("#mkt-sub").textContent = `${(d.rows || []).length} markets${q ? ' matching "' + q + '"' : ' (most active)'}`;
+  cards.innerHTML = (d.rows || []).map(marketCard).join("") || `<div class="muted">no markets found</div>`;
+}
+
+const LOADERS = {overview: loadOverview, trades: loadTrades, stocks: loadStocks, predictions: loadPredictions, markets: () => loadMarkets(false), lab: loadLab};
 let current = "overview";
 
 function show(view) {
@@ -285,6 +311,8 @@ function show(view) {
 
 $$(".sidebar a").forEach(a => a.onclick = () => show(a.dataset.view));
 $("#refresh").onclick = () => show(current);
+$("#mkt-go").onclick = () => loadMarkets(true);
+$("#mkt-q").addEventListener("keydown", e => { if (e.key === "Enter") loadMarkets(true); });
 
 // initial load + auto-refresh the active view every 30s
 show("overview");

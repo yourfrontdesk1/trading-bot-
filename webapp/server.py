@@ -195,6 +195,53 @@ def api_strategies():
     return {"rows": STRATEGIES}
 
 
+def api_markets(query):
+    """Browse the whole of Polymarket — top active markets across all categories,
+    optional ?q=search filter. Returns question, prices, volume, category, url."""
+    from urllib.parse import parse_qs
+    import json as _json
+    q = parse_qs(query)
+    search = (q.get("q", [""])[0]).strip().lower()
+    try:
+        import requests
+        out, pages = [], 8
+        for i in range(pages):
+            r = requests.get("https://gamma-api.polymarket.com/markets", params={
+                "active": "true", "closed": "false", "limit": 100, "offset": i * 100,
+                "order": "volume", "ascending": "false"}, timeout=20)
+            r.raise_for_status()
+            batch = r.json()
+            if not batch:
+                break
+            for m in batch:
+                question = m.get("question") or ""
+                if search and search not in question.lower():
+                    continue
+                outcomes = m.get("outcomes"); prices = m.get("outcomePrices")
+                if isinstance(outcomes, str): outcomes = _json.loads(outcomes)
+                if isinstance(prices, str): prices = _json.loads(prices)
+                pairs = list(zip(outcomes or [], [round(float(p), 3) for p in (prices or [])]))
+                ev = m.get("events")
+                slug = (ev[0].get("slug") if isinstance(ev, list) and ev else None) or m.get("slug")
+                cat = ""
+                if isinstance(ev, list) and ev:
+                    tags = ev[0].get("tags") or []
+                    cat = (tags[0].get("label") if tags and isinstance(tags[0], dict) else "") or ""
+                out.append({
+                    "question": question, "pairs": pairs[:3],
+                    "volume": round(float(m.get("volume") or 0)),
+                    "category": cat,
+                    "end": (m.get("endDate") or "")[:10],
+                    "url": f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com",
+                })
+            if search and len(out) >= 60:
+                break
+        out.sort(key=lambda x: x["volume"], reverse=True)
+        return {"rows": out[:60], "total": len(out)}
+    except Exception as e:
+        return {"error": str(e)[:150], "rows": []}
+
+
 def api_agent(query):
     """On-demand AI analyst. query: {subject, kind, context}. Slow (web search)."""
     from urllib.parse import parse_qs
@@ -259,8 +306,9 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         query = self.path.split("?", 1)[1] if "?" in self.path else ""
         if path == "/api/agent":
-            data = api_agent(query)
-            return self._send(200, json.dumps(data), "application/json")
+            return self._send(200, json.dumps(api_agent(query)), "application/json")
+        if path == "/api/markets":
+            return self._send(200, json.dumps(api_markets(query)), "application/json")
         if path in ROUTES:
             try:
                 data = ROUTES[path]()

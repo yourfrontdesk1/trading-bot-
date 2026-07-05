@@ -107,6 +107,22 @@ a.mkt:hover{text-decoration:underline}
 .stock .planline{font-size:12px;color:var(--muted);margin-top:8px}
 .stock .planline b{color:var(--txt)}
 
+/* all-markets browser */
+.mkt-search{display:flex;gap:10px;margin-bottom:8px}
+.mkt-search input{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--txt);
+  border-radius:8px;padding:11px 14px;font-size:14px}
+.mkt-search input:focus{outline:none;border-color:var(--accent)}
+.mkt-search button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:0 20px;font-weight:700;cursor:pointer}
+.mkt-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.mkt-grid{grid-template-columns:1fr}}
+.mkt{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.mkt .mq{font-weight:600;margin-bottom:10px;line-height:1.4}
+.mkt .mmeta{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-bottom:10px}
+.mkt .mcat{background:var(--panel2);padding:2px 8px;border-radius:5px}
+.mkt .odds{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.mkt .oc{background:var(--panel2);border-radius:6px;padding:4px 10px;font-size:12px}
+.mkt .oc b{color:var(--txt)}
+
 /* AI analyst */
 .ai-btn{margin-top:12px;width:100%;background:var(--panel2);color:var(--accent);
   border:1px solid var(--accent);border-radius:8px;padding:9px;font-weight:700;cursor:pointer}
