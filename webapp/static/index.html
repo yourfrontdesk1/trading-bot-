@@ -65,14 +65,12 @@
       </div>
     </section>
 
-    <!-- PREDICTIONS -->
+    <!-- PREDICTIONS (weather edge) -->
     <section id="predictions" class="view">
-      <div class="panel"><h2>Long-shots (&lt; 0.10 probability)</h2>
-        <table id="ls-table"><thead><tr><th>Market</th><th>Outcome</th><th>Prob</th></tr></thead><tbody></tbody></table>
-      </div>
-      <div class="panel"><h2>Most active markets</h2>
-        <table id="top-table"><thead><tr><th>Market</th><th>Volume</th><th>Odds</th></tr></thead><tbody></tbody></table>
-      </div>
+      <div class="edge-head">⭐ Highest-confidence bets right now <span id="edge-sub" class="muted"></span></div>
+      <div id="top-cards" class="top-grid"></div>
+      <div class="edge-head" style="margin-top:26px">🎯 All bet picks <span id="picks-sub" class="muted"></span></div>
+      <div id="pick-cards"></div>
     </section>
 
     <!-- LAB -->

@@ -73,11 +73,15 @@ def api_signals():
                     symbol_or_symbols=sym, timeframe=TimeFrame.Day, start=start
                 )).data.get(sym, [])
                 closes = [b.close for b in bars]
+                spark = [round(c, 2) for c in closes[-60:]]
+                change = round((closes[-1] / closes[-2] - 1) * 100, 2) if len(closes) > 1 else 0
                 out.append({"symbol": sym,
                             "price": round(closes[-1], 2) if closes else 0,
+                            "change": change,
+                            "spark": spark,
                             "signal": signal(closes, Params()) if closes else "?"})
             except Exception:
-                out.append({"symbol": sym, "price": 0, "signal": "?"})
+                out.append({"symbol": sym, "price": 0, "change": 0, "spark": [], "signal": "?"})
     except Exception as e:
         return {"error": str(e)[:80], "rows": []}
     return {"rows": out}
@@ -165,6 +169,20 @@ def api_strategies():
     return {"rows": STRATEGIES}
 
 
+def api_weather_edge():
+    """Live weather-edge bet opportunities, ranked. Mirrors the polybot approach."""
+    try:
+        from strategies.weather_edge import build_edge_table
+        rows = build_edge_table()
+        actionable = [r for r in rows if r.get("edge") and r["edge"] > 0 and r.get("bet_usd", 0) > 0]
+        top = [r for r in actionable if (r.get("p_win") or 0) >= 0.90][:3]
+        return {"top": top, "picks": actionable[:20],
+                "counts": {"top": len(top), "liquid": sum(1 for r in rows if r.get("liquid")),
+                           "total": len(rows)}}
+    except Exception as e:
+        return {"error": str(e)[:120], "top": [], "picks": [], "counts": {}}
+
+
 ROUTES = {
     "/api/overview": api_overview,
     "/api/signals": api_signals,
@@ -172,6 +190,7 @@ ROUTES = {
     "/api/polymarket": api_polymarket,
     "/api/strategies": api_strategies,
     "/api/trades": api_trades,
+    "/api/weather-edge": api_weather_edge,
 }
 
 

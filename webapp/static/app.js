@@ -84,15 +84,67 @@ async function loadTrades() {
   ).join("") : `<tr><td colspan=6 style="color:var(--muted)">no orders yet</td></tr>`;
 }
 
+const cents = p => Math.round((p || 0) * 100) + "¢";
+const tagClass = s => /LOCKED/.test(s) ? "locked" : /STRONG/.test(s) ? "strong" : "lean";
+
+function topCard(r, i) {
+  const side = (r.best_side || "").toLowerCase();
+  const price = r.best_side === "YES" ? r.yes_price : r.no_price;
+  const stake = 14, wins = price ? Math.round(stake / price) : 0;
+  return `<div class="bet">
+    <div class="rank">${i + 1}</div>
+    <div class="side ${side}">${r.best_side}</div>
+    <div class="loc">on <b>${r.city} ${r.threshold_c}°</b> · ${r.date_str}</div>
+    <div class="q">${r.question}</div>
+    <div class="stats">
+      <div class="stat"><div class="k">Win chance</div><div class="v g">${Math.round((r.p_win || 0) * 100)}%</div></div>
+      <div class="stat"><div class="k">Price</div><div class="v">${cents(price)}</div></div>
+      <div class="stat"><div class="k">$${stake} → wins</div><div class="v g">$${wins}</div></div>
+    </div>
+    <a class="btn" href="${r.poly_url}" target="_blank">Place ${r.best_side} bet on Polymarket →</a>
+  </div>`;
+}
+
+function pickCard(r) {
+  const side = (r.best_side || "").toLowerCase();
+  const pWin = Math.round((r.p_win || 0) * 100);
+  const pMkt = Math.round((r.p_market || 0) * 100);
+  const gap = Math.abs(pWin - pMkt);
+  return `<div class="pick">
+    <div class="top">
+      <div><span class="side ${side}">${r.best_side}</span>
+        <div><span class="tag ${tagClass(r.signal)}">${r.signal}</span>
+        <span class="muted" style="font-size:12px"> · edge ${cents(r.edge)}</span></div></div>
+      <div class="kelly"><div class="amt">$${r.bet_usd}</div><div class="lbl">Kelly bet</div></div>
+    </div>
+    <div class="q">${r.question}</div>
+    <div class="gapbar">
+      <div class="lbls"><span>Our predicted win chance <b>${pWin}%</b></span><span>Market thinks <b>${pMkt}%</b></span></div>
+      <div class="gaptrack"><div class="gapfill" style="width:${pWin}%"></div><div class="gapmark" style="left:${pMkt}%"></div></div>
+      <div class="gap-note">Gap of <b>${gap} points</b> = the edge</div>
+    </div>
+    <div class="wx">
+      <span>market needs <b>${r.threshold_c}°</b></span>
+      <span>today so far <b>${r.high_so_far_c ?? "—"}°</b></span>
+      <span>today forecast <b>${r.today_forecast_c ?? "—"}°</b></span>
+      <span>tomorrow <b>${r.tomorrow_forecast_c ?? "—"}°</b></span>
+      <span><a class="mkt" href="${r.poly_url}" target="_blank">open market →</a></span>
+    </div>
+  </div>`;
+}
+
 async function loadPredictions() {
-  const p = await get("/api/polymarket");
-  $("#ls-table tbody").innerHTML = (p.longshots || []).map(r =>
-    `<tr><td><a class="mkt" href="${r.url}" target="_blank">${r.q}</a></td><td>${r.outcome}</td><td>${r.prob}</td></tr>`
-  ).join("") || `<tr><td colspan=3 style="color:var(--muted)">none flagged</td></tr>`;
-  $("#top-table tbody").innerHTML = (p.top || []).map(r =>
-    `<tr><td><a class="mkt" href="${r.url}" target="_blank">${r.q}</a></td><td>$${Number(r.vol).toLocaleString()}</td>
-     <td>${r.pairs.map(x => x[0] + " " + x[1]).join(" / ")}</td></tr>`
-  ).join("") || `<tr><td colspan=3>${p.error || "no data"}</td></tr>`;
+  $("#top-cards").innerHTML = `<div class="muted">loading live forecasts + markets…</div>`;
+  const d = await get("/api/weather-edge");
+  if (d.error) { $("#top-cards").innerHTML = `<div class="muted">${d.error}</div>`; return; }
+  const c = d.counts || {};
+  $("#edge-sub").textContent = `(win chance ≥ 90%)`;
+  $("#picks-sub").textContent = `⭐ ${c.top || 0} top · ${c.liquid || 0} liquid · ${c.total || 0} signals total`;
+  $("#top-cards").innerHTML = (d.top || []).length
+    ? d.top.map(topCard).join("")
+    : `<div class="muted">No ≥90% bets right now. See all picks below.</div>`;
+  $("#pick-cards").innerHTML = (d.picks || []).map(pickCard).join("")
+    || `<div class="muted">No actionable edges found this scan.</div>`;
 }
 
 async function loadLab() {
