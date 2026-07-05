@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trading Bot</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app">
+  <nav class="sidebar">
+    <div class="brand">🤖 <span>Trading Bot</span></div>
+    <a data-view="overview" class="active">Overview</a>
+    <a data-view="stocks">Stocks</a>
+    <a data-view="predictions">Predictions</a>
+    <a data-view="lab">Strategy Lab</a>
+    <div class="foot">
+      <div id="status-dot" class="dot"></div>
+      <span id="status-text">connecting…</span>
+    </div>
+  </nav>
+
+  <main>
+    <header>
+      <h1 id="view-title">Overview</h1>
+      <div class="pill" id="mode-pill">—</div>
+      <button id="refresh">↻ Refresh</button>
+    </header>
+
+    <!-- OVERVIEW -->
+    <section id="overview" class="view active">
+      <div class="cards">
+        <div class="card"><div class="lbl">Account equity</div><div class="big" id="ov-equity">—</div><div class="sub" id="ov-mode">paper</div></div>
+        <div class="card"><div class="lbl">Dry run</div><div class="big" id="ov-dry">—</div><div class="sub">safety switch</div></div>
+        <div class="card"><div class="lbl">Open positions</div><div class="big" id="ov-pos">—</div><div class="sub">held now</div></div>
+        <div class="card"><div class="lbl">Markets scanned</div><div class="big" id="ov-poly">—</div><div class="sub">Polymarket</div></div>
+      </div>
+      <div class="panel"><h2>The one lesson from testing</h2>
+        <p class="note">Across 7 years of real data, no timing strategy beat simply buying and holding. The bot's edge isn't clever timing — it's discipline, risk control, and (next) an information edge via the agentic API.</p>
+        <div id="mini-chart"></div>
+      </div>
+    </section>
+
+    <!-- STOCKS -->
+    <section id="stocks" class="view">
+      <div class="panel"><h2>Watchlist signals</h2>
+        <table id="sig-table"><thead><tr><th>Symbol</th><th>Price</th><th>Signal</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="panel"><h2>Open positions</h2>
+        <table id="pos-table"><thead><tr><th>Symbol</th><th>Qty</th><th>Value</th><th>P/L</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <!-- PREDICTIONS -->
+    <section id="predictions" class="view">
+      <div class="panel"><h2>Long-shots (&lt; 0.10 probability)</h2>
+        <table id="ls-table"><thead><tr><th>Market</th><th>Outcome</th><th>Prob</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="panel"><h2>Most active markets</h2>
+        <table id="top-table"><thead><tr><th>Market</th><th>Volume</th><th>Odds</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <!-- LAB -->
+    <section id="lab" class="view">
+      <div class="panel"><h2>5 strategies, SPY 2018–2025</h2>
+        <div id="lab-chart"></div>
+        <table id="lab-table"><thead><tr><th>Strategy</th><th>Return</th><th>Max drawdown</th><th>Return / pain</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
