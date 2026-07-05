@@ -201,7 +201,13 @@ a.mkt:hover{text-decoration:underline}
 .pick::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
   background:linear-gradient(180deg,var(--green),var(--accent))}
 .pick:hover{border-color:#30384a;transform:translateY(-2px)}
-.pick .top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.pick .top{display:flex;align-items:center;gap:18px}
+.predict{flex:0 0 auto;text-align:center;background:radial-gradient(circle at 50% 35%,rgba(52,211,153,.14),rgba(52,211,153,.04));
+  border:1px solid rgba(52,211,153,.3);border-radius:14px;padding:14px 16px;min-width:104px}
+.predict .pnum{font-size:38px;font-weight:800;line-height:1;letter-spacing:-.03em;color:var(--green);font-variant-numeric:tabular-nums}
+.predict .plbl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:6px;line-height:1.35}
+.pmain{flex:1;min-width:0}
+.pmain .q{margin:9px 0 0}
 .pick .side{font-size:30px;font-weight:800;line-height:1;letter-spacing:-.02em}
 .pick .side.no{color:var(--red)} .pick .side.yes{color:var(--green)}
 .pick .kelly{text-align:right}

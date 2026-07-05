@@ -253,22 +253,26 @@ function pickCard(r) {
     : `<span class="station approx">~ approx location</span>`;
   return `<div class="pick">
     <div class="top">
-      <div>
-        <div style="display:flex;align-items:center;gap:10px">
+      <div class="predict">
+        <div class="pnum">${model}%</div>
+        <div class="plbl">our prediction<br>${r.best_side} wins</div>
+      </div>
+      <div class="pmain">
+        <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
           <span class="side ${side}">${r.best_side}</span>
           <span class="conf ${confClass(r.confidence)}">${r.confidence} confidence</span>
           ${act}
         </div>
-        <div style="margin-top:7px">${stn}<span class="ens"> · ${r.members} GFS sims · ${r.lead_days}d out</span></div>
+        <div class="q">${r.question}</div>
+        <div style="margin-top:6px">${stn}<span class="ens"> · ${r.members} GFS sims · ${r.lead_days}d out</span></div>
       </div>
       <div class="kelly"><div class="amt">$${r.bet_usd || "—"}</div><div class="lbl">¼-Kelly bet</div></div>
     </div>
-    <div class="q">${r.question}</div>
     <div class="reason">${r.reasoning || ""}</div>
     <div class="gapbar">
-      <div class="lbls"><span>Our model <b>${model}%</b></span><span>Market <b>${pMkt}%</b></span></div>
+      <div class="lbls"><span>Our prediction <b>${model}%</b></span><span>Market price <b>${pMkt}%</b></span></div>
       <div class="gaptrack"><div class="gapfill" style="width:${model}%"></div><div class="gapmark" style="left:${pMkt}%"></div></div>
-      <div class="gap-note">Edge <b>${cents(r.edge)}</b> — ${gap} points the market hasn't priced</div>
+      <div class="gap-note">Edge <b>${cents(r.edge)}</b> — we're ${gap} points more confident than the market</div>
     </div>
     <div class="wx">
       <span>needs <b>${r.threshold_c}°</b></span>
