@@ -195,6 +195,22 @@ def api_strategies():
     return {"rows": STRATEGIES}
 
 
+def api_agent(query):
+    """On-demand AI analyst. query: {subject, kind, context}. Slow (web search)."""
+    from urllib.parse import parse_qs
+    q = parse_qs(query)
+    subject = (q.get("subject", [""])[0]).strip()
+    kind = (q.get("kind", ["stock"])[0]).strip()
+    context = (q.get("context", [""])[0]).strip()
+    if not subject:
+        return {"error": "no subject"}
+    try:
+        from strategies.agent import analyze
+        return analyze(subject, kind, context)
+    except Exception as e:
+        return {"error": str(e)[:150]}
+
+
 def api_weather_edge():
     """Live weather-edge bet opportunities, ranked. Mirrors the polybot approach."""
     try:
@@ -232,6 +248,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        query = self.path.split("?", 1)[1] if "?" in self.path else ""
+        if path == "/api/agent":
+            data = api_agent(query)
+            return self._send(200, json.dumps(data), "application/json")
         if path in ROUTES:
             try:
                 data = ROUTES[path]()

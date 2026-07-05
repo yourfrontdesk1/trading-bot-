@@ -21,3 +21,7 @@ POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com"
 # Bot behaviour
 DRY_RUN = _bool("DRY_RUN", True)
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
+
+# Anthropic agent (agentic strategy)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-4-8")

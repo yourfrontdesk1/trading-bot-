@@ -93,8 +93,42 @@ function stockCard(r) {
     <div class="why"><span class="trend-dot ${r.above200 ? "up" : "down"}"></span>${r.why || ""}</div>
     ${plan}
     ${line}
+    <button class="ai-btn" onclick="runAgent('${r.symbol}','stock','Current price about $${r.price}.', this)">🧠 Ask the AI analyst</button>
+    <div class="ai-out"></div>
   </div>`;
 }
+
+// on-demand AI analyst — calls the Claude agent (web search + reasoning)
+async function runAgent(subject, kind, context, btn) {
+  const out = btn.parentElement.querySelector(".ai-out");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "🧠 Researching live… (~30s)";
+  out.innerHTML = "";
+  try {
+    const url = `/api/agent?subject=${encodeURIComponent(subject)}&kind=${kind}&context=${encodeURIComponent(context || "")}`;
+    const d = await (await fetch(url)).json();
+    if (d.error) {
+      out.innerHTML = `<div class="ai-card err">⚠ ${d.error}${d.raw ? "<br><small>" + d.raw + "</small>" : ""}</div>`;
+    } else {
+      const dir = (d.direction || "hold").toLowerCase();
+      const conf = Math.round((d.confidence || 0) * 100);
+      const findings = (d.findings || []).map(f => `<li>${f}</li>`).join("");
+      out.innerHTML = `<div class="ai-card">
+        <div class="ai-head"><span class="ai-dir ${dir}">${dir.toUpperCase()}</span>
+          <span class="ai-conf">${conf}% confidence</span></div>
+        <div class="ai-rat">${d.rationale || ""}</div>
+        ${findings ? `<ul class="ai-find">${findings}</ul>` : ""}
+        <div class="ai-model">via ${d.model || "Claude"}</div>
+      </div>`;
+    }
+  } catch (e) {
+    out.innerHTML = `<div class="ai-card err">⚠ ${e}</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+}
+window.runAgent = runAgent;
 
 async function loadStocks() {
   $("#stock-cards").innerHTML = `<div class="muted">loading prices…</div>`;
@@ -149,6 +183,8 @@ async function loadTrades() {
   ).join("") : `<tr><td colspan=6 style="color:var(--muted)">no orders yet</td></tr>`;
 }
 
+// escape a string for use inside a single-quoted JS arg within a double-quoted HTML attribute
+const attr = s => String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, "&quot;");
 const cents = p => Math.round((p || 0) * 100) + "¢";
 const tagClass = s => /LOCKED/.test(s) ? "locked" : /STRONG/.test(s) ? "strong" : "lean";
 
@@ -195,6 +231,8 @@ function pickCard(r) {
       <span>tomorrow <b>${r.tomorrow_forecast_c ?? "—"}°</b></span>
       <span><a class="mkt" href="${r.poly_url}" target="_blank">open market →</a></span>
     </div>
+    <button class="ai-btn" onclick="runAgent('${attr(r.question)}','prediction','${attr('Market prices: yes ' + (r.yes_price || '?') + ', no ' + (r.no_price || '?') + '. Our weather model leans ' + r.best_side + '.')}', this)">🧠 Ask the AI analyst</button>
+    <div class="ai-out"></div>
   </div>`;
 }
 
