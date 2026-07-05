@@ -26,21 +26,55 @@ function barChart(el, rows, key, fmt, color) {
 }
 
 async function loadOverview() {
-  const o = await get("/api/overview");
-  $("#ov-equity").textContent = o.online ? "$" + Number(o.equity).toLocaleString() : "offline";
-  $("#ov-mode").textContent = (o.mode || "").toLowerCase();
-  $("#ov-dry").textContent = o.dry_run ? "ON" : "OFF";
-  $("#ov-dry").style.color = o.dry_run ? "var(--green)" : "var(--amber)";
-  $("#ov-pos").textContent = o.positions;
-  $("#mode-pill").textContent = o.mode + (o.dry_run ? " · DRY RUN" : " · LIVE ORDERS");
-  const dot = $("#status-dot"), st = $("#status-text");
-  dot.className = "dot " + (o.online ? "on" : "off");
-  st.textContent = o.online ? "connected" : "offline";
-  const poly = await get("/api/polymarket");
-  $("#ov-poly").textContent = (poly.top || []).length + (poly.longshots || []).length;
-  const strat = await get("/api/strategies");
-  barChart($("#mini-chart"), strat.rows, "ret", v => v.toFixed(0) + "%",
-           v => v >= 100 ? "var(--green)" : "var(--accent)");
+  // fast stuff first
+  get("/api/overview").then(o => {
+    $("#ov-equity").textContent = o.online ? "$" + Number(o.equity).toLocaleString() : "offline";
+    $("#ov-mode").textContent = (o.mode || "").toLowerCase() + " account";
+    $("#ov-dry").textContent = o.dry_run ? "ON" : "OFF";
+    $("#ov-dry").style.color = o.dry_run ? "var(--green)" : "var(--amber)";
+    $("#mode-pill").textContent = o.mode + (o.dry_run ? " · DRY RUN" : " · LIVE ORDERS");
+    const dot = $("#status-dot"), st = $("#status-text");
+    dot.className = "dot " + (o.online ? "on" : "off");
+    st.textContent = o.online ? "connected" : "offline";
+  });
+  get("/api/strategies").then(s =>
+    barChart($("#mini-chart"), s.rows, "ret", v => v.toFixed(0) + "%",
+             v => v >= 100 ? "var(--green)" : "var(--accent)"));
+
+  // stocks strip
+  get("/api/signals").then(s => {
+    $("#ov-stocks").innerHTML = (s.rows || []).map(r => {
+      const up = r.change >= 0;
+      return `<div class="ov-row"><span class="ov-sym">${r.symbol}</span>
+        <span class="ov-mid">$${Number(r.price).toLocaleString()}</span>
+        <span class="chg ${up ? "up" : "down"}">${up ? "+" : ""}${r.change}%</span>
+        <span class="sig-badge ${r.signal}">${(r.signal || "?").toUpperCase()}</span></div>`;
+    }).join("") || `<span class="muted">no data</span>`;
+  });
+
+  // top markets
+  get("/api/markets").then(d => {
+    $("#ov-markets").innerHTML = (d.rows || []).slice(0, 6).map(m =>
+      `<div class="ov-row"><a class="ov-q" href="${m.url}" target="_blank">${m.question}</a>
+        <span class="ov-odds">${(m.pairs[0] ? Math.round(m.pairs[0][1] * 100) + "%" : "")}</span></div>`
+    ).join("") || `<span class="muted">no data</span>`;
+  });
+
+  // weather edges + ledger
+  get("/api/weather-edge").then(d => {
+    const L = d.ledger || {}, c = d.counts || {};
+    $("#ov-edges").textContent = c.actionable ?? "—";
+    $("#ov-logged").textContent = L.logged ?? 0;
+    $("#ov-winrate").textContent = L.win_rate != null ? L.win_rate + "% win rate" : "paper track record";
+    const picks = d.picks || [];
+    $("#ov-weather").innerHTML = picks.length ? picks.slice(0, 4).map(r => {
+      const model = Math.round((r.best_side === "YES" ? r.model_prob : 1 - r.model_prob) * 100);
+      return `<div class="ov-row"><span class="side ${(r.best_side || "").toLowerCase()}">${r.best_side}</span>
+        <a class="ov-q" href="${r.poly_url}" target="_blank">${r.city} ${r.threshold_c}°</a>
+        <span class="ov-mid">${model}% vs ${Math.round(r.p_market * 100)}%</span>
+        <span class="ov-edge">+${cents(r.edge)}</span></div>`;
+    }).join("") : `<span class="muted">No actionable edges right now — the model only fires on real, liquid mispricings.</span>`;
+  });
 }
 
 // inline SVG sparkline; green if series rose over the window, red if it fell

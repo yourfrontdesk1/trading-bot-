@@ -29,17 +29,25 @@
       <button id="refresh">↻ Refresh</button>
     </header>
 
-    <!-- OVERVIEW -->
+    <!-- OVERVIEW — everything at a glance -->
     <section id="overview" class="view active">
       <div class="cards">
         <div class="card"><div class="lbl">Account equity</div><div class="big" id="ov-equity">—</div><div class="sub" id="ov-mode">paper</div></div>
         <div class="card"><div class="lbl">Dry run</div><div class="big" id="ov-dry">—</div><div class="sub">safety switch</div></div>
-        <div class="card"><div class="lbl">Open positions</div><div class="big" id="ov-pos">—</div><div class="sub">held now</div></div>
-        <div class="card"><div class="lbl">Markets scanned</div><div class="big" id="ov-poly">—</div><div class="sub">Polymarket</div></div>
+        <div class="card"><div class="lbl">Weather edges</div><div class="big" id="ov-edges">—</div><div class="sub">actionable now</div></div>
+        <div class="card"><div class="lbl">Bets logged</div><div class="big" id="ov-logged">—</div><div class="sub" id="ov-winrate">paper track record</div></div>
       </div>
-      <div class="panel"><h2>The one lesson from testing</h2>
-        <p class="note">Across 7 years of real data, no timing strategy beat simply buying and holding. The bot's edge isn't clever timing — it's discipline, risk control, and (next) an information edge via the agentic API.</p>
-        <div id="mini-chart"></div>
+
+      <div class="grid">
+        <div>
+          <div class="panel"><h2>🎯 Live weather edges</h2><div id="ov-weather"><span class="muted">loading…</span></div></div>
+          <div class="panel"><h2>📈 Stock signals</h2><div id="ov-stocks"><span class="muted">loading…</span></div></div>
+        </div>
+        <div>
+          <div class="panel"><h2>🌍 Top Polymarket markets</h2><div id="ov-markets"><span class="muted">loading…</span></div></div>
+          <div class="panel"><h2>What the backtest taught us</h2><div id="mini-chart"></div>
+            <div class="muted" style="margin-top:8px">No timing strategy beat Buy &amp; Hold over 7 years. The bot's only real edge is the weather ensemble + the AI analyst.</div></div>
+        </div>
       </div>
     </section>
 

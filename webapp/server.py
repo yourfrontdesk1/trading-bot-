@@ -34,6 +34,17 @@ STRATEGIES = [
 ]
 
 _alp = None
+_cache = {}  # simple TTL cache for slow live endpoints
+
+
+def _cached(key, ttl, fn):
+    import time
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    val = fn()
+    _cache[key] = (time.time(), val)
+    return val
 
 
 def alpaca():
@@ -196,12 +207,16 @@ def api_strategies():
 
 
 def api_markets(query):
-    """Browse the whole of Polymarket — top active markets across all categories,
-    optional ?q=search filter. Returns question, prices, volume, category, url."""
     from urllib.parse import parse_qs
+    search = (parse_qs(query).get("q", [""])[0]).strip().lower()
+    if not search:
+        return _cached("markets", 180, lambda: _api_markets(""))
+    return _api_markets(search)
+
+
+def _api_markets(search):
+    """Browse the whole of Polymarket — top active markets across all categories."""
     import json as _json
-    q = parse_qs(query)
-    search = (q.get("q", [""])[0]).strip().lower()
     try:
         import requests
         out, pages = [], 8
@@ -259,6 +274,10 @@ def api_agent(query):
 
 
 def api_weather_edge():
+    return _cached("weather", 180, _api_weather_edge)
+
+
+def _api_weather_edge():
     """Live ensemble weather-edge opportunities, ranked, with paper-CLV logging."""
     try:
         from strategies.weather_edge import build_edge_table
