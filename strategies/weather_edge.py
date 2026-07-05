@@ -1,10 +1,19 @@
-"""Self-contained weather-edge engine for the trading bot.
+"""Weather-edge engine v2 — the one strategy that actually fits a £30 / £1-bet
+bankroll, rebuilt from the 15-agent research to be as sharp as possible.
 
-Ports Leon's proven polybot algorithm (parse temp market -> join Open-Meteo
-forecast -> compute edge -> quarter-Kelly size) into one standalone module that
-pulls everything LIVE, so it doesn't depend on the polybot backend/db.
+Upgrades over v1:
+  1. REAL money numbers: £38 bankroll, ~$2 cap (v1 lied with $200/$50).
+  2. ENSEMBLE probability: 31-member GFS ensemble -> P(bucket) = fraction of
+     members landing in the bucket. A real distribution, not a hand-tuned ladder.
+  3. RESOLUTION stations: markets settle on a specific airport METAR, not the
+     city centre. We use the station coord where known and flag the rest.
+  4. DYNAMIC maker/taker fee: maker orders are ~free; takers pay and it eats the
+     whole edge. Edge is computed for MAKER execution.
+  5. TIGHT selection: only fire when model beats price by a threshold, skip the
+     0.40-0.60 fee/liquidity dead-zone, prefer cheap tails a £1 maker can rest in.
 
-Credit: logic mirrors ~/polymarket-bot/backend/weather_edge.py + tools/weather.py.
+Credit: algorithm descends from Leon's polybot + suislanchez ensemble idea.
+Still NOT a money printer — the goal is proving positive CLV before scaling.
 """
 import re
 import json
@@ -14,10 +23,21 @@ from datetime import datetime, date
 import requests
 
 GAMMA = "https://gamma-api.polymarket.com"
-OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
-FEE_PER_SHARE = 0.02
-BANKROLL_USD = 200.0     # matches polybot MAX_POSITION_USD scale
-TRADE_CAP_USD = 50.0
+FORECAST_API = "https://api.open-meteo.com/v1/forecast"
+ENSEMBLE_API = "https://ensemble-api.open-meteo.com/v1/ensemble"
+
+# --- real bankroll for a £30 stake (~$38), £1 (~$1.25) bets ---
+BANKROLL_USD = 38.0
+TRADE_CAP_USD = 2.0
+KELLY_FRACTION = 0.25          # quarter-Kelly
+EDGE_THRESHOLD = 0.08          # only trade if model_prob - price > this
+EDGE_SANITY_CAP = 0.35         # edges above this = stale/illiquid price, not a real edge
+VOLUME_FLOOR = 250             # need a real two-sided book to actually fill
+MAKER_FEE = 0.0                # resting limit orders are fee-free on Polymarket
+TAKER_FEE_RATE = 0.02          # market orders cost ~feeRate * min(p,1-p); we avoid these
+MIN_SHARES = 5                 # Polymarket minimum order size
+MAX_LEAD_DAYS = 3              # forecasts past ~3 days are too noisy to trust
+MAX_EXPOSURE = 0.6             # never risk more than 60% of bankroll at once
 
 PATTERN = re.compile(
     r"(?P<kind>highest|lowest) temperature in (?P<city>[\w\s]+?) be (?P<threshold>\d+)\s*°?[CF]"
@@ -28,6 +48,7 @@ MONTHS = {m: i for i, m in enumerate(
     ["january","february","march","april","may","june","july","august",
      "september","october","november","december"], 1)}
 
+# City-centre coords (fallback). Markets actually settle on a station METAR.
 CITY_COORDS = {
     "Hong Kong": (22.32, 114.17), "London": (51.51, -0.13), "Paris": (48.86, 2.35),
     "New York City": (40.71, -74.01), "Miami": (25.76, -80.19), "Jinan": (36.65, 117.00),
@@ -45,13 +66,24 @@ CITY_COORDS = {
     "Karachi": (24.86, 67.01),
 }
 
-P_YES = {"LOCKED_YES": 0.98, "STRONG_YES": 0.80, "LEAN_YES": 0.55, "NEUTRAL": 0.30,
-         "LEAN_NO": 0.15, "STRONG_NO": 0.05, "LOCKED_NO": 0.01, "STALE": None}
+# Resolution STATION coords, where confidently known (airport METAR the market
+# settles on). Trading these matches the settlement feed instead of city-centre.
+# Cities not listed fall back to CITY_COORDS and are flagged station_confirmed=False.
+RESOLUTION_STATION = {
+    "New York City": (40.78, -73.97),   # Central Park (KNYC) — NWS CLI source
+    "London": (51.48, -0.45),           # Heathrow (EGLL) — WU primary London station
+    "Paris": (48.97, 2.44),             # Le Bourget (LFPB)
+    "Chicago": (41.96, -87.93),         # O'Hare (KORD)
+    "Los Angeles": (33.94, -118.41),    # LAX (KLAX)
+    "Miami": (25.79, -80.29),           # Miami Intl (KMIA)
+    "Tokyo": (35.69, 139.75),           # Tokyo (Otemachi) station
+}
 
 _wx_cache, _wx_ts = {}, 0.0
+_ens_cache, _ens_ts = {}, 0.0
 
 
-# ---------- parsing / edge (ported from polybot) ----------
+# ---------- parsing ----------
 def parse_date(date_str, fallback_year):
     parts = date_str.strip().split()
     if len(parts) < 2:
@@ -76,119 +108,46 @@ def parse_question(q):
             "date_str": m.group("date").strip()}
 
 
-def compute_edge(parsed, wx):
-    threshold, or_higher, or_below = parsed["threshold_c"], parsed["or_higher"], parsed["or_below"]
-    is_low = parsed.get("kind") == "lowest"
-    so_far = wx.get("low_so_far_c") if is_low else wx.get("high_so_far_c")
-    today_fc = wx.get("today_forecast_low_c") if is_low else wx.get("today_forecast_high_c")
-    tomorrow_fc = wx.get("tomorrow_forecast_low_c") if is_low else wx.get("tomorrow_forecast_high_c")
-    by_date = (wx.get("lows_by_date") if is_low else wx.get("highs_by_date")) or {}
-    city_today = (wx.get("local_time", "") or "").split("T")[0] or None
-    city_tomorrow = wx.get("tomorrow_date")
-    fallback_year = int(city_today.split("-")[0]) if city_today else datetime.utcnow().year
-    market_date = parse_date(parsed["date_str"], fallback_year)
-    if market_date and city_today and market_date < city_today:
-        return {"signal": "STALE", "delta_c": None, "market_date": market_date}
-    is_today = market_date == city_today
-    is_tomorrow = market_date == city_tomorrow
-    fc = by_date.get(market_date) if market_date else None
-    if fc is None and is_today: fc = today_fc
-    if fc is None and is_tomorrow: fc = tomorrow_fc
-    try:
-        d_today = date.fromisoformat(city_today) if city_today else None
-        d_market = date.fromisoformat(market_date) if market_date else None
-        days_out = (d_market - d_today).days if d_today and d_market else None
-    except Exception:
-        days_out = None
-    if fc is None:
-        return {"signal": "NO_DATA", "delta_c": None, "market_date": market_date, "days_out": days_out}
-    if is_today and not is_low and so_far is not None:
-        if or_higher and so_far >= threshold:
-            return {"signal": "LOCKED_YES", "delta_c": round(so_far - threshold, 1), "market_date": market_date, "days_out": days_out}
-        if or_below and so_far > (threshold + 0.99):
-            return {"signal": "LOCKED_NO", "delta_c": round(so_far - threshold, 1), "market_date": market_date, "days_out": days_out}
-        if not or_higher and not or_below and so_far >= (threshold + 1):
-            return {"signal": "LOCKED_NO", "delta_c": round(so_far - threshold, 1), "market_date": market_date, "days_out": days_out}
-    delta = round(fc - threshold, 1)
-    if or_higher:
-        sig = ("STRONG_YES" if delta >= 3 else "LEAN_YES" if delta >= 1 else
-               "STRONG_NO" if delta <= -3 else "LEAN_NO" if delta <= -1 else "NEUTRAL")
-    elif or_below:
-        sig = ("STRONG_YES" if delta <= -3 else "LEAN_YES" if delta <= -1 else
-               "STRONG_NO" if delta >= 3 else "LEAN_NO" if delta >= 1 else "NEUTRAL")
-    else:
-        sig = ("LEAN_YES" if 0 <= delta <= 0.99 else "NEUTRAL" if abs(delta) <= 1.5 else
-               "STRONG_NO" if abs(delta) >= 3 else "LEAN_NO")
-    return {"signal": sig, "delta_c": delta, "market_date": market_date, "days_out": days_out}
+def station_for(city):
+    """Return (lat, lon, confirmed) — resolution station if known, else city centre."""
+    if city in RESOLUTION_STATION:
+        return (*RESOLUTION_STATION[city], True)
+    if city in CITY_COORDS:
+        return (*CITY_COORDS[city], False)
+    return None
 
 
-def _decay(p, days_out):
-    if days_out is None or days_out <= 1:
-        return p
-    return 0.5 + (p - 0.5) * (1 - min(0.6, 0.10 * (days_out - 1)))
-
-
-def price_edge(signal, yes_price, no_price, days_out=None):
-    if yes_price is None or no_price is None or signal in ("STALE", "NO_DATA"):
-        return {"best_side": None, "edge": None, "p_win": None, "p_market": None}
-    p = P_YES.get(signal)
-    if p is None:
-        return {"best_side": None, "edge": None, "p_win": None, "p_market": None}
-    p = _decay(p, days_out)
-    edge_yes = p - yes_price - FEE_PER_SHARE
-    edge_no = (1 - p) - no_price - FEE_PER_SHARE
-    if edge_yes >= edge_no:
-        return {"best_side": "YES", "edge": round(edge_yes, 3), "p_win": round(p, 3), "p_market": round(yes_price, 3)}
-    return {"best_side": "NO", "edge": round(edge_no, 3), "p_win": round(1 - p, 3), "p_market": round(no_price, 3)}
-
-
-def bet_size_usd(edge, side_price, bankroll=BANKROLL_USD, cap=TRADE_CAP_USD):
-    if not edge or edge <= 0 or not side_price or side_price <= 0 or side_price >= 1:
-        return 0.0
-    return round(min(bankroll * max(0, (edge / (1 - side_price)) * 0.25), cap), 2)
-
-
-# ---------- live data ----------
+# ---------- weather (current obs + point forecast, for locked checks) ----------
 def fetch_weather(cities):
-    """Sync Open-Meteo fetch for the given city names. 1h cache."""
     global _wx_cache, _wx_ts
-    if _wx_cache and time.time() - _wx_ts < 3600:
+    if _wx_cache and time.time() - _wx_ts < 1800:
         return _wx_cache
     out = {}
     for city in cities:
-        coords = CITY_COORDS.get(city)
-        if not coords:
+        loc = station_for(city)
+        if not loc:
             continue
+        lat, lon, _ = loc
         try:
-            r = requests.get(OPEN_METEO, params={
-                "latitude": coords[0], "longitude": coords[1],
-                "current": "temperature_2m", "hourly": "temperature_2m",
+            r = requests.get(FORECAST_API, params={
+                "latitude": lat, "longitude": lon, "current": "temperature_2m",
+                "hourly": "temperature_2m",
                 "daily": "temperature_2m_max,temperature_2m_min",
                 "timezone": "auto", "forecast_days": 16},
-                headers={"User-Agent": "tradingbot/0.1"}, timeout=15)
+                headers={"User-Agent": "tradingbot/0.2"}, timeout=15)
             r.raise_for_status()
             d = r.json()
-            cur = d.get("current", {})
-            ctime = cur.get("time", "")
+            cur = d.get("current", {}); ctime = cur.get("time", "")
             tday = ctime.split("T")[0] if ctime else ""
             h = d.get("hourly", {})
             today_temps = [t for ti, t in zip(h.get("time", []), h.get("temperature_2m", []))
                            if ti.startswith(tday) and ti <= ctime and t is not None]
             dl = d.get("daily", {})
-            highs, lows, dates = (dl.get("temperature_2m_max", []),
-                                  dl.get("temperature_2m_min", []), dl.get("time", []))
             out[city] = {
-                "current_temp_c": cur.get("temperature_2m"),
                 "high_so_far_c": max(today_temps) if today_temps else None,
                 "low_so_far_c": min(today_temps) if today_temps else None,
-                "today_forecast_high_c": highs[0] if highs else None,
-                "today_forecast_low_c": lows[0] if lows else None,
-                "tomorrow_forecast_high_c": highs[1] if len(highs) > 1 else None,
-                "tomorrow_forecast_low_c": lows[1] if len(lows) > 1 else None,
-                "today_date": dates[0] if dates else None,
-                "tomorrow_date": dates[1] if len(dates) > 1 else None,
-                "highs_by_date": dict(zip(dates, highs)),
-                "lows_by_date": dict(zip(dates, lows)),
+                "today_date": (dl.get("time") or [None])[0],
+                "tomorrow_date": (dl.get("time") or [None, None])[1] if len(dl.get("time", [])) > 1 else None,
                 "local_time": ctime,
             }
         except Exception:
@@ -197,6 +156,91 @@ def fetch_weather(cities):
     return out
 
 
+# ---------- ensemble (the real probability distribution) ----------
+def fetch_ensemble(cities, is_low=False):
+    """Return {city: {date: [member max/min temps]}} from the 31-member GFS ensemble."""
+    global _ens_cache, _ens_ts
+    key = "low" if is_low else "high"
+    cache = _ens_cache.get(key)
+    if cache and time.time() - _ens_ts < 1800:
+        return cache
+    var = "temperature_2m_min" if is_low else "temperature_2m_max"
+    out = {}
+    for city in cities:
+        loc = station_for(city)
+        if not loc:
+            continue
+        lat, lon, _ = loc
+        try:
+            r = requests.get(ENSEMBLE_API, params={
+                "latitude": lat, "longitude": lon, "daily": var,
+                "models": "gfs025", "forecast_days": 5, "timezone": "auto"},
+                headers={"User-Agent": "tradingbot/0.2"}, timeout=20)
+            r.raise_for_status()
+            d = r.json().get("daily", {})
+            dates = d.get("time", [])
+            member_keys = [k for k in d if k.startswith(var)]
+            by_date = {}
+            for i, dt in enumerate(dates):
+                vals = [d[k][i] for k in member_keys if d[k] and d[k][i] is not None]
+                if vals:
+                    by_date[dt] = vals
+            out[city] = by_date
+        except Exception:
+            continue
+    _ens_cache[key] = out
+    _ens_ts = time.time()
+    return out
+
+
+def bucket_probability(members, parsed):
+    """P(YES) from the empirical ensemble distribution for this market."""
+    if not members:
+        return None
+    n = len(members)
+    T = parsed["threshold_c"]
+    if parsed["or_higher"]:
+        hits = sum(1 for m in members if m >= T)
+    elif parsed["or_below"]:
+        hits = sum(1 for m in members if m <= T + 0.99)
+    else:  # exact 1-degree bucket: floor(temp) == T
+        hits = sum(1 for m in members if T <= m < T + 1)
+    p = hits / n
+    # clamp away from 0/1 — 31 members can't prove certainty
+    return min(0.98, max(0.02, p))
+
+
+# ---------- pricing / sizing ----------
+def price_edge(p_yes, yes_price, no_price, maker=True):
+    """Best side + edge, computed for MAKER execution (fee ~0)."""
+    if p_yes is None or yes_price is None or no_price is None:
+        return {"best_side": None, "edge": None, "p_win": None, "p_market": None}
+    fee = MAKER_FEE if maker else TAKER_FEE_RATE
+    edge_yes = p_yes - yes_price - fee * min(yes_price, 1 - yes_price)
+    edge_no = (1 - p_yes) - no_price - fee * min(no_price, 1 - no_price)
+    if edge_yes >= edge_no:
+        return {"best_side": "YES", "edge": round(edge_yes, 3),
+                "p_win": round(p_yes, 3), "p_market": round(yes_price, 3)}
+    return {"best_side": "NO", "edge": round(edge_no, 3),
+            "p_win": round(1 - p_yes, 3), "p_market": round(no_price, 3)}
+
+
+def bet_size_usd(edge, side_price):
+    if not edge or edge <= 0 or not side_price or side_price <= 0 or side_price >= 1:
+        return 0.0
+    kelly = (edge / (1 - side_price)) * KELLY_FRACTION
+    return round(min(BANKROLL_USD * max(0, kelly), TRADE_CAP_USD), 2)
+
+
+def maker_fits(side_price, bet_usd):
+    """A £1-ish maker order needs >= 5 shares, so it only fits cheap prices."""
+    if not side_price or side_price <= 0:
+        return False
+    shares = bet_usd / side_price
+    return shares >= MIN_SHARES
+
+
+# ---------- polymarket markets ----------
 def _prices(market):
     outcomes, prices = market.get("outcomes"), market.get("outcomePrices")
     if isinstance(outcomes, str): outcomes = json.loads(outcomes)
@@ -208,7 +252,6 @@ def _prices(market):
 
 
 def fetch_temp_markets(max_pages=6, page=200):
-    """Page through active Polymarket markets, keep temperature ones."""
     keep = []
     for i in range(max_pages):
         r = requests.get(f"{GAMMA}/markets", params={
@@ -225,50 +268,87 @@ def fetch_temp_markets(max_pages=6, page=200):
     return keep
 
 
+def _lead_days(market_date, today):
+    try:
+        return (date.fromisoformat(market_date) - date.fromisoformat(today)).days
+    except Exception:
+        return None
+
+
 def build_edge_table():
-    """Returns ranked list of live weather-edge bet opportunities."""
+    """Ranked live weather-edge opportunities, ensemble-driven, maker-fit filtered."""
     markets = fetch_temp_markets()
-    cities = {parse_question(m["question"])["city"] for m in markets
-              if parse_question(m.get("question", ""))}
-    cities = {c for c in cities if c in CITY_COORDS}
-    wx_all = fetch_weather(cities)
+    parsed_all = [(m, parse_question(m["question"])) for m in markets]
+    parsed_all = [(m, p) for m, p in parsed_all if p and p["city"] in CITY_COORDS]
+    cities = {p["city"] for _, p in parsed_all}
+
+    wx = fetch_weather(cities)
+    ens_high = fetch_ensemble(cities, is_low=False)
+    ens_low = fetch_ensemble(cities, is_low=True)
 
     rows = []
-    for m in markets:
-        parsed = parse_question(m["question"])
-        wx = wx_all.get(parsed["city"])
-        if not wx:
-            continue
+    for m, parsed in parsed_all:
+        city = parsed["city"]
+        is_low = parsed["kind"] == "lowest"
+        w = wx.get(city, {})
+        today = (w.get("local_time", "") or "").split("T")[0] or None
+        fallback_year = int(today.split("-")[0]) if today else datetime.utcnow().year
+        market_date = parse_date(parsed["date_str"], fallback_year)
+        if market_date and today and market_date < today:
+            continue  # stale
+        lead = _lead_days(market_date, today) if (market_date and today) else None
+
+        members = (ens_low if is_low else ens_high).get(city, {}).get(market_date)
+        p_yes = bucket_probability(members, parsed) if members else None
+
         yes_p, no_p = _prices(m)
-        edge = compute_edge(parsed, wx)
-        pe = price_edge(edge["signal"], yes_p, no_p, days_out=edge.get("days_out"))
+        pe = price_edge(p_yes, yes_p, no_p, maker=True)
         side_price = (yes_p if pe["best_side"] == "YES" else no_p) or 0
         bet = bet_size_usd(pe["edge"], side_price)
+        fits = maker_fits(side_price, bet) if bet else False
+
+        liquid = bool(yes_p and no_p and 0.05 <= yes_p <= 0.95 and 0.05 <= no_p <= 0.95)
+        vol = float(m.get("volume") or 0)
+        # tight selection: REAL edge (not stale-price artifact), liquid book,
+        # out of the dead-zone, maker-fittable, near-term.
+        actionable = bool(
+            pe["edge"] and EDGE_THRESHOLD < pe["edge"] <= EDGE_SANITY_CAP
+            and p_yes is not None
+            and liquid and vol >= VOLUME_FLOOR
+            and lead is not None and 0 <= lead <= MAX_LEAD_DAYS
+            and side_price and (side_price <= 0.40 or side_price >= 0.60)  # skip dead-zone
+            and fits
+        )
+
         ev = m.get("events")
         slug = (ev[0].get("slug") if isinstance(ev, list) and ev else None) or m.get("slug")
-        is_low = parsed.get("kind") == "lowest"
+        st = station_for(city)
         rows.append({
-            "question": m["question"], "city": parsed["city"],
-            "threshold_c": parsed["threshold_c"], "kind": parsed["kind"],
-            "or_higher": parsed["or_higher"], "or_below": parsed["or_below"],
-            "date_str": parsed["date_str"],
-            "high_so_far_c": wx.get("low_so_far_c") if is_low else wx.get("high_so_far_c"),
-            "today_forecast_c": wx.get("today_forecast_low_c") if is_low else wx.get("today_forecast_high_c"),
-            "tomorrow_forecast_c": wx.get("tomorrow_forecast_low_c") if is_low else wx.get("tomorrow_forecast_high_c"),
+            "question": m["question"], "city": city, "threshold_c": parsed["threshold_c"],
+            "kind": parsed["kind"], "date_str": parsed["date_str"], "market_date": market_date,
+            "lead_days": lead,
+            "station_confirmed": bool(st and st[2]),
+            "members": len(members) if members else 0,
+            "model_prob": round(p_yes, 3) if p_yes is not None else None,
+            "high_so_far_c": w.get("low_so_far_c") if is_low else w.get("high_so_far_c"),
             "yes_price": yes_p, "no_price": no_p,
             "volume_usd": round(float(m.get("volume") or 0)),
-            "bet_usd": bet,
-            "liquid": bool(yes_p and no_p and 0.05 <= yes_p <= 0.95 and 0.05 <= no_p <= 0.95),
+            "bet_usd": bet, "maker_fits": fits,
+            "actionable": actionable,
+            "liquid": liquid,
             "poly_url": f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com",
-            **edge, **pe,
+            **pe,
         })
-    rows.sort(key=lambda r: (r.get("edge") is None, -(r.get("edge") or -999)))
+    # actionable first, then by edge
+    rows.sort(key=lambda r: (not r["actionable"], -(r.get("edge") or -999)))
     return rows
 
 
 if __name__ == "__main__":
     t = build_edge_table()
-    print(f"{len(t)} temp markets with edge data")
-    for r in t[:5]:
+    act = [r for r in t if r["actionable"]]
+    print(f"{len(t)} temp markets | {len(act)} ACTIONABLE (ensemble edge, maker-fit)")
+    for r in act[:8]:
         print(f"  {r['best_side']} {r['city']} {r['threshold_c']}° "
-              f"edge={r['edge']} win={r.get('p_win')} bet=${r['bet_usd']} :: {r['signal']}")
+              f"model={r['model_prob']} mkt={r['p_market']} edge={r['edge']} "
+              f"bet=${r['bet_usd']} lead={r['lead_days']}d station={'✓' if r['station_confirmed'] else '~'}")

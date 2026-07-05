@@ -212,17 +212,26 @@ def api_agent(query):
 
 
 def api_weather_edge():
-    """Live weather-edge bet opportunities, ranked. Mirrors the polybot approach."""
+    """Live ensemble weather-edge opportunities, ranked, with paper-CLV logging."""
     try:
         from strategies.weather_edge import build_edge_table
+        from strategies import ledger
+        from datetime import datetime
         rows = build_edge_table()
-        actionable = [r for r in rows if r.get("edge") and r["edge"] > 0 and r.get("bet_usd", 0) > 0]
-        top = [r for r in actionable if (r.get("p_win") or 0) >= 0.90][:3]
-        return {"top": top, "picks": actionable[:20],
-                "counts": {"top": len(top), "liquid": sum(1 for r in rows if r.get("liquid")),
-                           "total": len(rows)}}
+        actionable = [r for r in rows if r.get("actionable")]
+        # log the actionable bets to the paper track record
+        try:
+            ledger.log_scan(actionable, datetime.now().isoformat(timespec="seconds"))
+        except Exception:
+            pass
+        return {"picks": actionable[:20],
+                "watch": [r for r in rows if not r["actionable"] and r.get("model_prob") is not None][:10],
+                "counts": {"actionable": len(actionable),
+                           "liquid": sum(1 for r in rows if r.get("liquid")),
+                           "total": len(rows)},
+                "ledger": ledger.stats()}
     except Exception as e:
-        return {"error": str(e)[:120], "top": [], "picks": [], "counts": {}}
+        return {"error": str(e)[:150], "picks": [], "watch": [], "counts": {}}
 
 
 ROUTES = {

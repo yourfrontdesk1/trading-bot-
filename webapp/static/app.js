@@ -208,46 +208,58 @@ function topCard(r, i) {
 
 function pickCard(r) {
   const side = (r.best_side || "").toLowerCase();
-  const pWin = Math.round((r.p_win || 0) * 100);
+  const model = Math.round((r.model_prob != null ? (side === "yes" ? r.model_prob : 1 - r.model_prob) : r.p_win) * 100);
   const pMkt = Math.round((r.p_market || 0) * 100);
-  const gap = Math.abs(pWin - pMkt);
+  const gap = Math.abs(model - pMkt);
+  const stn = r.station_confirmed
+    ? `<span class="station ok">✓ resolution station</span>`
+    : `<span class="station approx">~ approx location</span>`;
   return `<div class="pick">
     <div class="top">
       <div><span class="side ${side}">${r.best_side}</span>
-        <div><span class="tag ${tagClass(r.signal)}">${r.signal}</span>
-        <span class="muted" style="font-size:12px"> · edge ${cents(r.edge)}</span></div></div>
-      <div class="kelly"><div class="amt">$${r.bet_usd}</div><div class="lbl">Kelly bet</div></div>
+        <div style="margin-top:4px">${stn}
+        <span class="ens"> · ${r.members} GFS members · ${r.lead_days}d out</span></div></div>
+      <div class="kelly"><div class="amt">$${r.bet_usd}</div><div class="lbl">¼-Kelly maker bet</div></div>
     </div>
     <div class="q">${r.question}</div>
     <div class="gapbar">
-      <div class="lbls"><span>Our predicted win chance <b>${pWin}%</b></span><span>Market thinks <b>${pMkt}%</b></span></div>
-      <div class="gaptrack"><div class="gapfill" style="width:${pWin}%"></div><div class="gapmark" style="left:${pMkt}%"></div></div>
-      <div class="gap-note">Gap of <b>${gap} points</b> = the edge</div>
+      <div class="lbls"><span>Ensemble model <b>${model}%</b></span><span>Market price <b>${pMkt}%</b></span></div>
+      <div class="gaptrack"><div class="gapfill" style="width:${model}%"></div><div class="gapmark" style="left:${pMkt}%"></div></div>
+      <div class="gap-note">Edge <b>${cents(r.edge)}</b> — the model sees ~${gap} points the market doesn't</div>
     </div>
     <div class="wx">
       <span>market needs <b>${r.threshold_c}°</b></span>
-      <span>today so far <b>${r.high_so_far_c ?? "—"}°</b></span>
-      <span>today forecast <b>${r.today_forecast_c ?? "—"}°</b></span>
-      <span>tomorrow <b>${r.tomorrow_forecast_c ?? "—"}°</b></span>
+      <span>observed so far <b>${r.high_so_far_c ?? "—"}°</b></span>
+      <span>volume <b>$${Number(r.volume_usd || 0).toLocaleString()}</b></span>
       <span><a class="mkt" href="${r.poly_url}" target="_blank">open market →</a></span>
     </div>
-    <button class="ai-btn" onclick="runAgent('${attr(r.question)}','prediction','${attr('Market prices: yes ' + (r.yes_price || '?') + ', no ' + (r.no_price || '?') + '. Our weather model leans ' + r.best_side + '.')}', this)">🧠 Ask the AI analyst</button>
+    <button class="ai-btn" onclick="runAgent('${attr(r.question)}','prediction','${attr('Market prices yes ' + (r.yes_price || '?') + '. Our GFS ensemble says model win-prob ' + model + '% for ' + r.best_side + '.')}', this)">🧠 Ask the AI analyst</button>
     <div class="ai-out"></div>
   </div>`;
 }
 
 async function loadPredictions() {
-  $("#top-cards").innerHTML = `<div class="muted">loading live forecasts + markets…</div>`;
+  $("#pick-cards").innerHTML = `<div class="muted">pulling live markets + 31-member GFS ensemble…</div>`;
+  $("#watch-cards").innerHTML = "";
   const d = await get("/api/weather-edge");
-  if (d.error) { $("#top-cards").innerHTML = `<div class="muted">${d.error}</div>`; return; }
-  const c = d.counts || {};
-  $("#edge-sub").textContent = `(win chance ≥ 90%)`;
-  $("#picks-sub").textContent = `⭐ ${c.top || 0} top · ${c.liquid || 0} liquid · ${c.total || 0} signals total`;
-  $("#top-cards").innerHTML = (d.top || []).length
-    ? d.top.map(topCard).join("")
-    : `<div class="muted">No ≥90% bets right now. See all picks below.</div>`;
-  $("#pick-cards").innerHTML = (d.picks || []).map(pickCard).join("")
-    || `<div class="muted">No actionable edges found this scan.</div>`;
+  if (d.error) { $("#pick-cards").innerHTML = `<div class="muted">${d.error}</div>`; return; }
+  const c = d.counts || {}, L = d.ledger || {};
+  $("#picks-sub").textContent = `${c.actionable || 0} actionable · ${c.liquid || 0} liquid · ${c.total || 0} scanned`;
+  $("#ledger-banner").innerHTML = `
+    <div class="lstat"><div class="k">Bets logged</div><div class="v">${L.logged ?? 0}</div></div>
+    <div class="lstat"><div class="k">Resolved</div><div class="v">${L.resolved ?? 0}</div></div>
+    <div class="lstat"><div class="k">Win rate</div><div class="v">${L.win_rate != null ? L.win_rate + "%" : "—"}</div></div>
+    <div class="lstat"><div class="k">Avg edge</div><div class="v">${L.avg_edge != null ? Math.round(L.avg_edge * 100) + "¢" : "—"}</div></div>
+    <div class="lnote">${L.note || ""}</div>`;
+  $("#pick-cards").innerHTML = (d.picks || []).length
+    ? d.picks.map(pickCard).join("")
+    : `<div class="muted">No actionable edges this scan — that's normal. The model only fires on liquid, near-term, maker-fittable mispricings. Fewer, better signals.</div>`;
+  $("#watch-cards").innerHTML = (d.watch || []).map(r => `
+    <div class="watch-row"><span class="side ${(r.best_side || "").toLowerCase()}" style="font-size:14px">${r.best_side || "—"}</span>
+      <span class="wq">${r.question}</span>
+      <span class="we">${r.model_prob != null ? Math.round(r.model_prob * 100) + "% model" : ""} vs ${Math.round((r.p_market || 0) * 100)}% mkt</span>
+      <span class="muted">edge ${cents(r.edge || 0)}</span></div>`).join("")
+    || `<div class="muted">nothing on the watchlist</div>`;
 }
 
 async function loadLab() {
