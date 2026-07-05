@@ -240,34 +240,43 @@ function topCard(r, i) {
   </div>`;
 }
 
+const confClass = c => ({ High: "hi", Medium: "med", Low: "lo" }[c] || "lo");
+
 function pickCard(r) {
   const side = (r.best_side || "").toLowerCase();
   const model = Math.round((r.model_prob != null ? (side === "yes" ? r.model_prob : 1 - r.model_prob) : r.p_win) * 100);
   const pMkt = Math.round((r.p_market || 0) * 100);
   const gap = Math.abs(model - pMkt);
+  const act = r.actionable ? `<span class="act-tag">✓ bettable now</span>` : `<span class="act-tag watch">watchlist</span>`;
   const stn = r.station_confirmed
-    ? `<span class="station ok">✓ resolution station</span>`
+    ? `<span class="station ok">✓ exact station</span>`
     : `<span class="station approx">~ approx location</span>`;
   return `<div class="pick">
     <div class="top">
-      <div><span class="side ${side}">${r.best_side}</span>
-        <div style="margin-top:4px">${stn}
-        <span class="ens"> · ${r.members} GFS members · ${r.lead_days}d out</span></div></div>
-      <div class="kelly"><div class="amt">$${r.bet_usd}</div><div class="lbl">¼-Kelly maker bet</div></div>
+      <div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="side ${side}">${r.best_side}</span>
+          <span class="conf ${confClass(r.confidence)}">${r.confidence} confidence</span>
+          ${act}
+        </div>
+        <div style="margin-top:7px">${stn}<span class="ens"> · ${r.members} GFS sims · ${r.lead_days}d out</span></div>
+      </div>
+      <div class="kelly"><div class="amt">$${r.bet_usd || "—"}</div><div class="lbl">¼-Kelly bet</div></div>
     </div>
     <div class="q">${r.question}</div>
+    <div class="reason">${r.reasoning || ""}</div>
     <div class="gapbar">
-      <div class="lbls"><span>Ensemble model <b>${model}%</b></span><span>Market price <b>${pMkt}%</b></span></div>
+      <div class="lbls"><span>Our model <b>${model}%</b></span><span>Market <b>${pMkt}%</b></span></div>
       <div class="gaptrack"><div class="gapfill" style="width:${model}%"></div><div class="gapmark" style="left:${pMkt}%"></div></div>
-      <div class="gap-note">Edge <b>${cents(r.edge)}</b> — the model sees ~${gap} points the market doesn't</div>
+      <div class="gap-note">Edge <b>${cents(r.edge)}</b> — ${gap} points the market hasn't priced</div>
     </div>
     <div class="wx">
-      <span>market needs <b>${r.threshold_c}°</b></span>
-      <span>observed so far <b>${r.high_so_far_c ?? "—"}°</b></span>
+      <span>needs <b>${r.threshold_c}°</b></span>
+      <span>so far <b>${r.high_so_far_c ?? "—"}°</b></span>
       <span>volume <b>$${Number(r.volume_usd || 0).toLocaleString()}</b></span>
       <span><a class="mkt" href="${r.poly_url}" target="_blank">open market →</a></span>
     </div>
-    <button class="ai-btn" onclick="runAgent('${attr(r.question)}','prediction','${attr('Market prices yes ' + (r.yes_price || '?') + '. Our GFS ensemble says model win-prob ' + model + '% for ' + r.best_side + '.')}', this)">🧠 Ask the AI analyst</button>
+    <button class="ai-btn" onclick="runAgent('${attr(r.question)}','prediction','${attr('Market prices yes ' + (r.yes_price || '?') + '. Our GFS ensemble model gives ' + model + '% for ' + r.best_side + '.')}', this)">🧠 Deeper AI research on this bet</button>
     <div class="ai-out"></div>
   </div>`;
 }
@@ -287,13 +296,7 @@ async function loadPredictions() {
     <div class="lnote">${L.note || ""}</div>`;
   $("#pick-cards").innerHTML = (d.picks || []).length
     ? d.picks.map(pickCard).join("")
-    : `<div class="muted">No actionable edges this scan — that's normal. The model only fires on liquid, near-term, maker-fittable mispricings. Fewer, better signals.</div>`;
-  $("#watch-cards").innerHTML = (d.watch || []).map(r => `
-    <div class="watch-row"><span class="side ${(r.best_side || "").toLowerCase()}" style="font-size:14px">${r.best_side || "—"}</span>
-      <span class="wq">${r.question}</span>
-      <span class="we">${r.model_prob != null ? Math.round(r.model_prob * 100) + "% model" : ""} vs ${Math.round((r.p_market || 0) * 100)}% mkt</span>
-      <span class="muted">edge ${cents(r.edge || 0)}</span></div>`).join("")
-    || `<div class="muted">nothing on the watchlist</div>`;
+    : `<div class="muted">No edges this scan — the model found no liquid market it disagrees with. Check back; markets and forecasts move hourly.</div>`;
 }
 
 async function loadLab() {

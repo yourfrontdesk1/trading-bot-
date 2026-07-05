@@ -285,14 +285,18 @@ def _api_weather_edge():
         from datetime import datetime
         rows = build_edge_table()
         actionable = [r for r in rows if r.get("actionable")]
-        # log the actionable bets to the paper track record
+        # the best bets to SHOW: liquid, real model view, meaningful edge — ranked
+        candidates = [r for r in rows
+                      if r.get("liquid") and r.get("model_prob") is not None
+                      and (r.get("edge") or 0) > 0.03]
+        candidates.sort(key=lambda r: -(r.get("edge") or 0))
         try:
             ledger.log_scan(actionable, datetime.now().isoformat(timespec="seconds"))
         except Exception:
             pass
-        return {"picks": actionable[:20],
-                "watch": [r for r in rows if not r["actionable"] and r.get("model_prob") is not None][:10],
+        return {"picks": candidates[:12],
                 "counts": {"actionable": len(actionable),
+                           "candidates": len(candidates),
                            "liquid": sum(1 for r in rows if r.get("liquid")),
                            "total": len(rows)},
                 "ledger": ledger.stats()}
@@ -318,6 +322,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
 

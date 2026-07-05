@@ -193,21 +193,60 @@ def fetch_ensemble(cities, is_low=False):
     return out
 
 
+def bucket_hits(members, parsed):
+    """How many ensemble members land in the YES outcome."""
+    T = parsed["threshold_c"]
+    if parsed["or_higher"]:
+        return sum(1 for m in members if m >= T)
+    if parsed["or_below"]:
+        return sum(1 for m in members if m <= T + 0.99)
+    return sum(1 for m in members if T <= m < T + 1)  # exact 1-degree bucket
+
+
 def bucket_probability(members, parsed):
     """P(YES) from the empirical ensemble distribution for this market."""
     if not members:
         return None
-    n = len(members)
-    T = parsed["threshold_c"]
-    if parsed["or_higher"]:
-        hits = sum(1 for m in members if m >= T)
-    elif parsed["or_below"]:
-        hits = sum(1 for m in members if m <= T + 0.99)
-    else:  # exact 1-degree bucket: floor(temp) == T
-        hits = sum(1 for m in members if T <= m < T + 1)
-    p = hits / n
-    # clamp away from 0/1 — 31 members can't prove certainty
-    return min(0.98, max(0.02, p))
+    p = bucket_hits(members, parsed) / len(members)
+    return min(0.98, max(0.02, p))  # 31 members can't prove certainty
+
+
+def build_reasoning(parsed, members, p_yes, pe, lead, station_ok):
+    """Per-bet research summary, educated guess, and confidence — the plain-English
+    'here's what I think and how sure I am' for each card."""
+    n = len(members) if members else 0
+    hits = bucket_hits(members, parsed) if members else 0
+    side = pe["best_side"]
+    model_pct = round((p_yes if side == "YES" else 1 - p_yes) * 100)
+    mkt_pct = round((pe["p_market"] or 0) * 100)
+    edge_pts = round((pe["edge"] or 0) * 100)
+    kind = "at or above" if parsed["or_higher"] else "at or below" if parsed["or_below"] else "exactly at"
+    yes_desc = f"{hits} of {n} forecast simulations land {kind} {parsed['threshold_c']}°C"
+
+    if side == "YES":
+        call = f"the temperature WILL hit the target, so back YES"
+    else:
+        call = f"the temperature will MISS the target, so back NO"
+
+    lead_note = ("today's market — the forecast is about as certain as it gets" if lead == 0
+                 else "tomorrow — still a high-confidence forecast" if lead == 1
+                 else f"{lead} days out, so the forecast carries more uncertainty")
+    stn_note = ("scored against the exact station this market settles on"
+                if station_ok else "scored against the city (settlement station not yet verified — small extra risk)")
+
+    reasoning = (f"{yes_desc}, so our model puts the real chance at {model_pct}% while the "
+                 f"market is pricing {mkt_pct}%. That {edge_pts}-point gap is the edge — {call}. "
+                 f"It's {lead_note}, {stn_note}.")
+
+    # confidence: bigger edge + confirmed station + near-term = higher
+    score = edge_pts + (8 if station_ok else 0) + (6 if (lead or 9) <= 1 else 0)
+    if score >= 22:
+        conf = "High"
+    elif score >= 14:
+        conf = "Medium"
+    else:
+        conf = "Low"
+    return {"reasoning": reasoning, "confidence": conf, "conf_model_pct": model_pct}
 
 
 # ---------- pricing / sizing ----------
@@ -323,6 +362,9 @@ def build_edge_table():
         ev = m.get("events")
         slug = (ev[0].get("slug") if isinstance(ev, list) and ev else None) or m.get("slug")
         st = station_for(city)
+        reason = (build_reasoning(parsed, members, p_yes, pe, lead, bool(st and st[2]))
+                  if (p_yes is not None and pe["best_side"]) else
+                  {"reasoning": "Not enough forecast data to form a view.", "confidence": "—", "conf_model_pct": None})
         rows.append({
             "question": m["question"], "city": city, "threshold_c": parsed["threshold_c"],
             "kind": parsed["kind"], "date_str": parsed["date_str"], "market_date": market_date,
@@ -337,7 +379,7 @@ def build_edge_table():
             "actionable": actionable,
             "liquid": liquid,
             "poly_url": f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com",
-            **pe,
+            **pe, **reason,
         })
     # actionable first, then by edge
     rows.sort(key=lambda r: (not r["actionable"], -(r.get("edge") or -999)))
