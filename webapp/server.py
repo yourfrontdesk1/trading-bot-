@@ -21,7 +21,7 @@ import config
 from brokers.polymarket_client import PolymarketClient
 from strategies.momentum import Params, signal, position_size
 
-PORT = 8080
+PORT = 8090
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 WATCHLIST = ["AAPL", "MSFT", "SPY", "NVDA", "AMD", "TSM"]
 
