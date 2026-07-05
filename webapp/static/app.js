@@ -1,7 +1,7 @@
 // Trading Bot SPA — fetches the JSON API and renders each view.
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const TITLES = {overview: "Overview", trades: "Trades", stocks: "Stocks", predictions: "Weather edge", markets: "All markets", lab: "Strategy Lab"};
+const TITLES = {overview: "Overview", trades: "Trades", stocks: "Stocks", predictions: "Weather edge", calendar: "Calendar", markets: "All markets", lab: "Strategy Lab"};
 
 async function get(path) {
   try { const r = await fetch(path); return await r.json(); }
@@ -342,7 +342,51 @@ async function loadMarkets(force) {
   cards.innerHTML = (d.rows || []).map(marketCard).join("") || `<div class="muted">no markets found</div>`;
 }
 
-const LOADERS = {overview: loadOverview, trades: loadTrades, stocks: loadStocks, predictions: loadPredictions, markets: () => loadMarkets(false), lab: loadLab};
+// compact bet card for the calendar
+function calCard(r) {
+  const side = (r.best_side || "").toLowerCase();
+  const win = Math.round((side === "yes" ? r.model_prob : 1 - r.model_prob) * 100);
+  return `<a class="calcard" href="${r.poly_url}" target="_blank">
+    <div class="calpct ${side}">${win}%</div>
+    <div class="calbody">
+      <div class="calside side ${side}">${r.best_side} · <span class="conf ${confClass(r.confidence)}">${r.confidence}</span></div>
+      <div class="calloc">${r.city} ${r.threshold_c}°</div>
+    </div>
+    <div class="caledge">+${cents(r.edge)}</div>
+  </a>`;
+}
+
+function dayLabel(lead, dateStr) {
+  if (lead === 0) return "Today";
+  if (lead === 1) return "Tomorrow";
+  try {
+    const d = new Date(dateStr + "T12:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" });
+  } catch { return dateStr; }
+}
+
+async function loadCalendar() {
+  $("#cal-content").innerHTML = `<div class="muted">building the calendar…</div>`;
+  const d = await get("/api/weather-edge");
+  const up = (d.upcoming || []).filter(r => r.market_date);
+  if (!up.length) { $("#cal-content").innerHTML = `<div class="muted">No upcoming bets found.</div>`; return; }
+  // group by date
+  const byDate = {};
+  up.forEach(r => { (byDate[r.market_date] ||= []).push(r); });
+  const dates = Object.keys(byDate).sort();
+  $("#cal-sub").textContent = `${up.length} bets across ${dates.length} days`;
+  $("#cal-content").innerHTML = dates.map(dt => {
+    const bets = byDate[dt].sort((a, b) => (b.edge || 0) - (a.edge || 0));
+    const lead = bets[0].lead_days;
+    return `<div class="calday">
+      <div class="calhead"><span class="caldate">${dayLabel(lead, dt)}</span>
+        <span class="muted">${dt} · ${bets.length} bet${bets.length > 1 ? "s" : ""}</span></div>
+      <div class="calgrid">${bets.map(calCard).join("")}</div>
+    </div>`;
+  }).join("");
+}
+
+const LOADERS = {overview: loadOverview, trades: loadTrades, stocks: loadStocks, predictions: loadPredictions, calendar: loadCalendar, markets: () => loadMarkets(false), lab: loadLab};
 let current = "overview";
 
 function show(view) {

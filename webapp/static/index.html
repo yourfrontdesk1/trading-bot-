@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>Trading Bot</title>
-<link rel="stylesheet" href="/style.css?v=5">
+<link rel="stylesheet" href="/style.css?v=6">
 </head>
 <body>
 <div class="app">
@@ -16,6 +16,7 @@
     <a data-view="trades">Trades</a>
     <a data-view="stocks">Stocks</a>
     <a data-view="predictions">Weather edge</a>
+    <a data-view="calendar">Calendar</a>
     <a data-view="markets">All markets</a>
     <a data-view="lab">Strategy Lab</a>
     <div class="foot">
@@ -84,6 +85,12 @@
       <div id="pick-cards"></div>
     </section>
 
+    <!-- CALENDAR — all upcoming bets by date -->
+    <section id="calendar" class="view">
+      <div class="edge-head">📅 Upcoming bets by day <span id="cal-sub" class="muted"></span></div>
+      <div id="cal-content"></div>
+    </section>
+
     <!-- ALL MARKETS -->
     <section id="markets" class="view">
       <div class="mkt-search">
@@ -103,6 +110,6 @@
     </section>
   </main>
 </div>
-<script src="/app.js?v=5"></script>
+<script src="/app.js?v=6"></script>
 </body>
 </html>

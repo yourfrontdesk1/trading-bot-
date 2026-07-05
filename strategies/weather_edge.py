@@ -182,7 +182,7 @@ def fetch_ensemble(cities, is_low=False):
         try:
             r = requests.get(ENSEMBLE_API, params={
                 "latitude": lat, "longitude": lon, "daily": var,
-                "models": ENSEMBLE_MODELS, "forecast_days": 5, "timezone": "auto"},
+                "models": ENSEMBLE_MODELS, "forecast_days": 7, "timezone": "auto"},
                 headers={"User-Agent": "tradingbot/0.2"}, timeout=25)
             r.raise_for_status()
             d = r.json().get("daily", {})

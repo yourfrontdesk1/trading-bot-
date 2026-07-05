@@ -295,6 +295,7 @@ def _api_weather_edge():
         except Exception:
             pass
         return {"picks": candidates[:12],
+                "upcoming": candidates[:60],  # all upcoming, for the calendar
                 "counts": {"actionable": len(actionable),
                            "candidates": len(candidates),
                            "liquid": sum(1 for r in rows if r.get("liquid")),
