@@ -36,12 +36,16 @@ class AlpacaClient:
         return (quote.bid_price + quote.ask_price) / 2
 
     def buy(self, symbol, qty):
+        if config.DRY_RUN:
+            return {"dry_run": True, "would": "buy", "symbol": symbol, "qty": qty}
         order = MarketOrderRequest(
             symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.DAY
         )
         return self.trading.submit_order(order)
 
     def sell(self, symbol, qty):
+        if config.DRY_RUN:
+            return {"dry_run": True, "would": "sell", "symbol": symbol, "qty": qty}
         order = MarketOrderRequest(
             symbol=symbol, qty=qty, side=OrderSide.SELL, time_in_force=TimeInForce.DAY
         )

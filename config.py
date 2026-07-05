@@ -6,7 +6,12 @@ load_dotenv()
 
 
 def _bool(name, default):
-    return os.getenv(name, str(default)).strip().lower() in ("1", "true", "yes")
+    # Fail SAFE: a missing OR blank value keeps the (safe) default. A blank
+    # `DRY_RUN=` line must never resolve to False and silently arm live trading.
+    v = os.getenv(name)
+    if v is None or not v.strip():
+        return default
+    return v.strip().lower() in ("1", "true", "yes")
 
 
 # Alpaca (stocks)

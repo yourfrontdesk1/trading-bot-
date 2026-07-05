@@ -38,7 +38,7 @@ async function loadOverview() {
     st.textContent = o.online ? "connected" : "offline";
   });
   get("/api/strategies").then(s =>
-    barChart($("#mini-chart"), s.rows, "ret", v => v.toFixed(0) + "%",
+    barChart($("#mini-chart"), s.rows || [], "ret", v => v.toFixed(0) + "%",
              v => v >= 100 ? "var(--green)" : "var(--accent)"));
 
   // stocks strip
@@ -55,8 +55,8 @@ async function loadOverview() {
   // top markets
   get("/api/markets").then(d => {
     $("#ov-markets").innerHTML = (d.rows || []).slice(0, 6).map(m =>
-      `<div class="ov-row"><a class="ov-q" href="${m.url}" target="_blank">${m.question}</a>
-        <span class="ov-odds">${(m.pairs[0] ? Math.round(m.pairs[0][1] * 100) + "%" : "")}</span></div>`
+      `<div class="ov-row"><a class="ov-q" href="${m.url}" target="_blank">${esc(m.question)}</a>
+        <span class="ov-odds">${(m.pairs && m.pairs[0] ? Math.round(m.pairs[0][1] * 100) + "%" : "")}</span></div>`
     ).join("") || `<span class="muted">no data</span>`;
   });
 
@@ -78,6 +78,7 @@ async function loadOverview() {
 }
 
 // inline SVG sparkline; green if series rose over the window, red if it fell
+let sparkUID = 0;
 function sparkline(vals, w = 240, h = 46) {
   if (!vals || vals.length < 2) return "";
   const min = Math.min(...vals), max = Math.max(...vals), span = max - min || 1;
@@ -87,7 +88,7 @@ function sparkline(vals, w = 240, h = 46) {
   const up = vals[vals.length - 1] >= vals[0];
   const col = up ? "var(--green)" : "var(--red)";
   const area = `M0,${h} L${vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" L")} L${w},${h} Z`;
-  const gid = "g" + Math.floor(x(vals[0]) * 1000) + vals.length;
+  const gid = "spark" + (++sparkUID);
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none">
     <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1">
       <stop offset="0%" stop-color="${col}" stop-opacity="0.28"/>
@@ -219,6 +220,8 @@ async function loadTrades() {
 
 // escape a string for use inside a single-quoted JS arg within a double-quoted HTML attribute
 const attr = s => String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, "&quot;");
+// escape for safe insertion into HTML text/content (external market questions etc.)
+const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const cents = p => Math.round((p || 0) * 100) + "¢";
 const tagClass = s => /LOCKED/.test(s) ? "locked" : /STRONG/.test(s) ? "strong" : "lean";
 
@@ -231,7 +234,7 @@ function topCard(r, i) {
     <div class="rank">${i + 1}</div>
     <div class="side ${side}">${r.best_side}</div>
     <div class="loc">on <b>${r.city} ${r.threshold_c}°</b> · ${r.date_str} · <span class="conf ${confClass(r.confidence)}">${r.confidence}</span></div>
-    <div class="q">${r.question}</div>
+    <div class="q">${esc(r.question)}</div>
     <div class="stats">
       <div class="stat"><div class="k">Our prediction</div><div class="v g">${win}%</div></div>
       <div class="stat"><div class="k">Market price</div><div class="v">${cents(price)}</div></div>
@@ -264,7 +267,7 @@ function pickCard(r) {
           <span class="conf ${confClass(r.confidence)}">${r.confidence} confidence</span>
           ${act}
         </div>
-        <div class="q">${r.question}</div>
+        <div class="q">${esc(r.question)}</div>
         <div style="margin-top:6px">${stn}<span class="ens"> · ${r.members} sims (GFS+ECMWF) · ${r.lead_days}d out</span></div>
       </div>
       <div class="kelly"><div class="amt">$${r.bet_usd || "—"}</div><div class="lbl">¼-Kelly bet</div></div>
@@ -289,7 +292,10 @@ function pickCard(r) {
 async function loadPredictions() {
   $("#top-cards").innerHTML = `<div class="muted">pulling live markets + 82-member GFS+ECMWF ensemble…</div>`;
   const d = await get("/api/weather-edge");
-  if (d.error) { $("#pick-cards").innerHTML = `<div class="muted">${d.error}</div>`; return; }
+  if (d.error) {
+    $("#top-cards").innerHTML = $("#pick-cards").innerHTML = `<div class="muted">${esc(d.error)}</div>`;
+    return;
+  }
   const c = d.counts || {}, L = d.ledger || {};
   $("#picks-sub").textContent = `${c.actionable || 0} actionable · ${c.liquid || 0} liquid · ${c.total || 0} scanned`;
   $("#ledger-banner").innerHTML = `
@@ -308,9 +314,10 @@ async function loadPredictions() {
 
 async function loadLab() {
   const s = await get("/api/strategies");
-  barChart($("#lab-chart"), s.rows, "ret", v => v.toFixed(1) + "%",
+  const rows = s.rows || [];
+  barChart($("#lab-chart"), rows, "ret", v => v.toFixed(1) + "%",
            v => v >= 100 ? "var(--green)" : "var(--accent)");
-  $("#lab-table tbody").innerHTML = s.rows.map(r =>
+  $("#lab-table tbody").innerHTML = rows.map(r =>
     `<tr><td>${r.name}</td><td>+${r.ret}%</td>
      <td class="pos-down">${r.dd}%</td><td>${(r.ret / Math.abs(r.dd)).toFixed(2)}</td></tr>`
   ).join("");
@@ -319,8 +326,8 @@ async function loadLab() {
 function marketCard(m) {
   const odds = (m.pairs || []).map(p => `<span class="oc">${p[0]} <b>${Math.round(p[1] * 100)}%</b></span>`).join("");
   return `<div class="mkt">
-    <div class="mq"><a class="mkt" href="${m.url}" target="_blank" style="color:inherit;text-decoration:none">${m.question}</a></div>
-    <div class="mmeta">${m.category ? `<span class="mcat">${m.category}</span>` : ""}
+    <div class="mq"><a class="mkt" href="${m.url}" target="_blank" style="color:inherit;text-decoration:none">${esc(m.question)}</a></div>
+    <div class="mmeta">${m.category ? `<span class="mcat">${esc(m.category)}</span>` : ""}
       <span>vol $${Number(m.volume).toLocaleString()}</span>${m.end ? `<span>ends ${m.end}</span>` : ""}</div>
     <div class="odds">${odds}</div>
     <button class="ai-btn" onclick="runAgent('${attr(m.question)}','prediction','${attr('Market odds: ' + (m.pairs || []).map(p => p[0] + ' ' + Math.round(p[1] * 100) + '%').join(', ') + '.')}', this)">🧠 Ask the AI analyst</button>
@@ -331,13 +338,13 @@ function marketCard(m) {
 let mktLoaded = false;
 async function loadMarkets(force) {
   if (mktLoaded && !force) return;
-  mktLoaded = true;
   const cards = $("#mkt-cards");
   cards.className = "mkt-grid";
   cards.innerHTML = `<div class="muted">loading Polymarket…</div>`;
   const q = ($("#mkt-q").value || "").trim();
   const d = await get("/api/markets" + (q ? "?q=" + encodeURIComponent(q) : ""));
-  if (d.error) { cards.innerHTML = `<div class="muted">${d.error}</div>`; return; }
+  if (d.error) { mktLoaded = false; cards.innerHTML = `<div class="muted">${esc(d.error)}</div>`; return; }
+  mktLoaded = true;
   $("#mkt-sub").textContent = `${(d.rows || []).length} markets${q ? ' matching "' + q + '"' : ' (most active)'}`;
   cards.innerHTML = (d.rows || []).map(marketCard).join("") || `<div class="muted">no markets found</div>`;
 }

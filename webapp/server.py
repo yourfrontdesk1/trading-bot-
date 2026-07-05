@@ -7,7 +7,7 @@ Endpoints (JSON):
   GET /api/polymarket   - prediction-market scan (long-shots + top by volume)
   GET /api/strategies   - the 5-strategy backtest results
 
-Serves the SPA in static/. Run:  python webapp/server.py  -> http://localhost:8080
+Serves the SPA in static/. Run:  python webapp/server.py  -> http://localhost:8090
 """
 import os
 import sys
@@ -43,7 +43,9 @@ def _cached(key, ttl, fn):
     if hit and time.time() - hit[0] < ttl:
         return hit[1]
     val = fn()
-    _cache[key] = (time.time(), val)
+    # never cache a transient error — it would stick for the whole TTL
+    if not (isinstance(val, dict) and val.get("error")):
+        _cache[key] = (time.time(), val)
     return val
 
 
@@ -77,6 +79,10 @@ def api_signals():
     out = []
     try:
         a = alpaca()
+        try:
+            acct_equity = a.account_value()
+        except Exception:
+            acct_equity = 100000
         for sym in WATCHLIST:
             try:
                 start = datetime.now() - timedelta(days=400)
@@ -101,11 +107,7 @@ def api_signals():
                     why = "below 200-day trend — stay out"
                 # trade plan: risk-managed position sizing (1% equity risk, 8% stop)
                 p = Params()
-                try:
-                    equity = alpaca().account_value()
-                except Exception:
-                    equity = 100000
-                qty = position_size(equity, price, p)
+                qty = position_size(acct_equity, price, p)
                 stop_price = round(price * (1 - p.stop_pct), 2)
                 dollars = round(qty * price, 2)
                 risk_dollars = round(qty * price * p.stop_pct, 2)
@@ -118,7 +120,8 @@ def api_signals():
                                      "risk": risk_dollars, "stop_pct": int(p.stop_pct * 100)}})
             except Exception:
                 out.append({"symbol": sym, "price": 0, "change": 0, "spark": [],
-                            "signal": "?", "why": "", "above200": False})
+                            "signal": "?", "why": "", "above200": False,
+                            "plan": {"qty": 0, "dollars": 0, "stop": 0, "risk": 0, "stop_pct": 0}})
     except Exception as e:
         return {"error": str(e)[:80], "rows": []}
     return {"rows": out}
@@ -302,7 +305,7 @@ def _api_weather_edge():
                            "total": len(rows)},
                 "ledger": ledger.stats()}
     except Exception as e:
-        return {"error": str(e)[:150], "picks": [], "watch": [], "counts": {}}
+        return {"error": str(e)[:150], "picks": [], "upcoming": [], "counts": {}, "ledger": {}}
 
 
 ROUTES = {
@@ -340,10 +343,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 data = {"error": str(e)[:120]}
             return self._send(200, json.dumps(data), "application/json")
-        # static files
+        # static files — confine strictly inside STATIC (no ../ traversal)
         if path == "/":
             path = "/index.html"
-        fp = os.path.join(STATIC, path.lstrip("/"))
+        root = os.path.realpath(STATIC)
+        fp = os.path.realpath(os.path.join(root, path.lstrip("/")))
+        if not (fp == root or fp.startswith(root + os.sep)):
+            return self._send(404, "not found", "text/plain")
         if os.path.isfile(fp):
             ctype = ("text/html" if fp.endswith(".html")
                      else "application/javascript" if fp.endswith(".js")

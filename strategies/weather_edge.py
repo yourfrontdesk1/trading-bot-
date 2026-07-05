@@ -3,7 +3,7 @@ bankroll, rebuilt from the 15-agent research to be as sharp as possible.
 
 Upgrades over v1:
   1. REAL money numbers: £38 bankroll, ~$2 cap (v1 lied with $200/$50).
-  2. ENSEMBLE probability: 31-member GFS ensemble -> P(bucket) = fraction of
+  2. ENSEMBLE probability: 82-member GFS+ECMWF ensemble blend -> P(bucket) = fraction of
      members landing in the bucket. A real distribution, not a hand-tuned ladder.
   3. RESOLUTION stations: markets settle on a specific airport METAR, not the
      city centre. We use the station coord where known and flag the rest.
@@ -43,7 +43,7 @@ ENSEMBLE_MODELS = "gfs025,ecmwf_ifs025"  # blend GFS (31) + ECMWF (51) = 82 memb
 CALIBRATION = 0.82            # ensembles are overconfident; shrink toward 0.5 (90% -> ~83%)
 
 PATTERN = re.compile(
-    r"(?P<kind>highest|lowest) temperature in (?P<city>[\w\s]+?) be (?P<threshold>\d+)\s*°?[CF]"
+    r"(?P<kind>highest|lowest) temperature in (?P<city>[\w\s]+?) be (?P<threshold>\d+)\s*°?(?P<unit>[CF])"
     r"(?P<modifier>\s+or higher|\s+or below)? on (?P<date>[\w\s\d]+?)\??$",
     re.IGNORECASE,
 )
@@ -72,18 +72,19 @@ CITY_COORDS = {
 # Resolution STATION coords, where confidently known (airport METAR the market
 # settles on). Trading these matches the settlement feed instead of city-centre.
 # Cities not listed fall back to CITY_COORDS and are flagged station_confirmed=False.
+# Only include stations verified against the market's settlement source. Anything
+# uncertain is left out (falls back to city-centre, flagged station_confirmed=False)
+# rather than claiming a confirmed station we're not sure of.
 RESOLUTION_STATION = {
     "New York City": (40.78, -73.97),   # Central Park (KNYC) — NWS CLI source
-    "London": (51.48, -0.45),           # Heathrow (EGLL) — WU primary London station
-    "Paris": (48.97, 2.44),             # Le Bourget (LFPB)
-    "Chicago": (41.96, -87.93),         # O'Hare (KORD)
-    "Los Angeles": (33.94, -118.41),    # LAX (KLAX)
-    "Miami": (25.79, -80.29),           # Miami Intl (KMIA)
-    "Tokyo": (35.69, 139.75),           # Tokyo (Otemachi) station
 }
 
 _wx_cache, _wx_ts = {}, 0.0
-_ens_cache, _ens_ts = {}, 0.0
+_ens_cache, _ens_ts = {}, {}   # per-key timestamps (high/low fetched separately)
+
+
+def _ometeo_unit(u):
+    return "fahrenheit" if u == "F" else "celsius"
 
 
 # ---------- parsing ----------
@@ -105,8 +106,11 @@ def parse_question(q):
     if not m:
         return None
     modifier = (m.group("modifier") or "").strip().lower()
+    # threshold is in the market's NATIVE unit (F for US cities, C elsewhere);
+    # we fetch forecasts in that same unit so bucketing stays correct.
     return {"kind": m.group("kind").lower(), "city": m.group("city").strip(),
-            "threshold_c": int(m.group("threshold")),
+            "threshold_c": int(m.group("threshold")),  # value is in `unit`, not always C
+            "unit": m.group("unit").upper(),
             "or_higher": modifier == "or higher", "or_below": modifier == "or below",
             "date_str": m.group("date").strip()}
 
@@ -121,7 +125,10 @@ def station_for(city):
 
 
 # ---------- weather (current obs + point forecast, for locked checks) ----------
-def _fetch_weather_one(city):
+# `units` maps city -> 'C'/'F' so we fetch each city's forecast in the same unit
+# the market is quoted/settled in (US cities = F). This keeps bucketing correct.
+def _fetch_weather_one(args):
+    city, unit = args
     loc = station_for(city)
     if not loc:
         return city, None
@@ -130,7 +137,7 @@ def _fetch_weather_one(city):
         r = requests.get(FORECAST_API, params={
             "latitude": lat, "longitude": lon, "current": "temperature_2m",
             "hourly": "temperature_2m", "daily": "temperature_2m_max,temperature_2m_min",
-            "timezone": "auto", "forecast_days": 16},
+            "timezone": "auto", "forecast_days": 16, "temperature_unit": _ometeo_unit(unit)},
             headers={"User-Agent": "tradingbot/0.2"}, timeout=15)
         r.raise_for_status()
         d = r.json()
@@ -151,13 +158,13 @@ def _fetch_weather_one(city):
         return city, None
 
 
-def fetch_weather(cities):
+def fetch_weather(units):
     global _wx_cache, _wx_ts
     if _wx_cache and time.time() - _wx_ts < 1800:
         return _wx_cache
     out = {}
     with ThreadPoolExecutor(max_workers=12) as ex:
-        for city, data in ex.map(_fetch_weather_one, list(cities)):
+        for city, data in ex.map(_fetch_weather_one, list(units.items())):
             if data:
                 out[city] = data
     _wx_cache, _wx_ts = out, time.time()
@@ -165,16 +172,18 @@ def fetch_weather(cities):
 
 
 # ---------- ensemble (the real probability distribution) ----------
-def fetch_ensemble(cities, is_low=False):
-    """Return {city: {date: [member max/min temps]}} from the 31-member GFS ensemble."""
+def fetch_ensemble(units, is_low=False):
+    """Return {city: {date: [member temps]}} from the 82-member GFS+ECMWF blend,
+    fetched in each city's native unit."""
     global _ens_cache, _ens_ts
     key = "low" if is_low else "high"
     cache = _ens_cache.get(key)
-    if cache and time.time() - _ens_ts < 1800:
+    if cache and time.time() - _ens_ts.get(key, 0) < 1800:
         return cache
     var = "temperature_2m_min" if is_low else "temperature_2m_max"
 
-    def one(city):
+    def one(args):
+        city, unit = args
         loc = station_for(city)
         if not loc:
             return city, None
@@ -182,7 +191,8 @@ def fetch_ensemble(cities, is_low=False):
         try:
             r = requests.get(ENSEMBLE_API, params={
                 "latitude": lat, "longitude": lon, "daily": var,
-                "models": ENSEMBLE_MODELS, "forecast_days": 7, "timezone": "auto"},
+                "models": ENSEMBLE_MODELS, "forecast_days": 7, "timezone": "auto",
+                "temperature_unit": _ometeo_unit(unit)},
                 headers={"User-Agent": "tradingbot/0.2"}, timeout=25)
             r.raise_for_status()
             d = r.json().get("daily", {})
@@ -199,11 +209,11 @@ def fetch_ensemble(cities, is_low=False):
 
     out = {}
     with ThreadPoolExecutor(max_workers=12) as ex:
-        for city, data in ex.map(one, list(cities)):
+        for city, data in ex.map(one, list(units.items())):
             if data is not None:
                 out[city] = data
     _ens_cache[key] = out
-    _ens_ts = time.time()
+    _ens_ts[key] = time.time()
     return out
 
 
@@ -221,13 +231,17 @@ def bucket_probability(members, parsed):
     """P(YES) from the empirical ensemble distribution, then CALIBRATED.
 
     Raw ensemble fractions are overconfident (underdispersive), so we shrink
-    toward 0.5 by CALIBRATION — the research found claimed 90% ~= real 80%.
+    toward the outcome's BASE RATE by CALIBRATION. For wide 'or higher/below'
+    markets the base rate is ~0.5; for a narrow 1-degree 'exact' bucket it's
+    small (~1/12), so shrinking toward 0.5 would WRONGLY inflate near-zero tails
+    into false edges. Shrinking toward the base rate fixes that.
     """
     if not members:
         return None
     raw = bucket_hits(members, parsed) / len(members)
-    cal = 0.5 + (raw - 0.5) * CALIBRATION
-    return min(0.97, max(0.03, cal))
+    base = 0.5 if (parsed["or_higher"] or parsed["or_below"]) else 1.0 / 12
+    cal = base + (raw - base) * CALIBRATION
+    return min(0.97, max(0.01, cal))
 
 
 def build_reasoning(parsed, members, p_yes, pe, lead, station_ok):
@@ -339,11 +353,17 @@ def build_edge_table():
     markets = fetch_temp_markets()
     parsed_all = [(m, parse_question(m["question"])) for m in markets]
     parsed_all = [(m, p) for m, p in parsed_all if p and p["city"] in CITY_COORDS]
-    cities = {p["city"] for _, p in parsed_all}
+    # each city's unit = whatever its markets are quoted in (US=F, else C).
+    # If a city somehow has both, prefer F (US markets); consistent per-city in practice.
+    units = {}
+    for _, p in parsed_all:
+        c, u = p["city"], p.get("unit", "C")
+        if c not in units or u == "F":
+            units[c] = u
 
-    wx = fetch_weather(cities)
-    ens_high = fetch_ensemble(cities, is_low=False)
-    ens_low = fetch_ensemble(cities, is_low=True)
+    wx = fetch_weather(units)
+    ens_high = fetch_ensemble(units, is_low=False)
+    ens_low = fetch_ensemble(units, is_low=True)
 
     rows = []
     for m, parsed in parsed_all:
