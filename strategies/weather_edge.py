@@ -19,6 +19,7 @@ import re
 import json
 import time
 from datetime import datetime, date
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -120,40 +121,45 @@ def station_for(city):
 
 
 # ---------- weather (current obs + point forecast, for locked checks) ----------
+def _fetch_weather_one(city):
+    loc = station_for(city)
+    if not loc:
+        return city, None
+    lat, lon, _ = loc
+    try:
+        r = requests.get(FORECAST_API, params={
+            "latitude": lat, "longitude": lon, "current": "temperature_2m",
+            "hourly": "temperature_2m", "daily": "temperature_2m_max,temperature_2m_min",
+            "timezone": "auto", "forecast_days": 16},
+            headers={"User-Agent": "tradingbot/0.2"}, timeout=15)
+        r.raise_for_status()
+        d = r.json()
+        cur = d.get("current", {}); ctime = cur.get("time", "")
+        tday = ctime.split("T")[0] if ctime else ""
+        h = d.get("hourly", {})
+        today_temps = [t for ti, t in zip(h.get("time", []), h.get("temperature_2m", []))
+                       if ti.startswith(tday) and ti <= ctime and t is not None]
+        dl = d.get("daily", {})
+        return city, {
+            "high_so_far_c": max(today_temps) if today_temps else None,
+            "low_so_far_c": min(today_temps) if today_temps else None,
+            "today_date": (dl.get("time") or [None])[0],
+            "tomorrow_date": (dl.get("time") or [None, None])[1] if len(dl.get("time", [])) > 1 else None,
+            "local_time": ctime,
+        }
+    except Exception:
+        return city, None
+
+
 def fetch_weather(cities):
     global _wx_cache, _wx_ts
     if _wx_cache and time.time() - _wx_ts < 1800:
         return _wx_cache
     out = {}
-    for city in cities:
-        loc = station_for(city)
-        if not loc:
-            continue
-        lat, lon, _ = loc
-        try:
-            r = requests.get(FORECAST_API, params={
-                "latitude": lat, "longitude": lon, "current": "temperature_2m",
-                "hourly": "temperature_2m",
-                "daily": "temperature_2m_max,temperature_2m_min",
-                "timezone": "auto", "forecast_days": 16},
-                headers={"User-Agent": "tradingbot/0.2"}, timeout=15)
-            r.raise_for_status()
-            d = r.json()
-            cur = d.get("current", {}); ctime = cur.get("time", "")
-            tday = ctime.split("T")[0] if ctime else ""
-            h = d.get("hourly", {})
-            today_temps = [t for ti, t in zip(h.get("time", []), h.get("temperature_2m", []))
-                           if ti.startswith(tday) and ti <= ctime and t is not None]
-            dl = d.get("daily", {})
-            out[city] = {
-                "high_so_far_c": max(today_temps) if today_temps else None,
-                "low_so_far_c": min(today_temps) if today_temps else None,
-                "today_date": (dl.get("time") or [None])[0],
-                "tomorrow_date": (dl.get("time") or [None, None])[1] if len(dl.get("time", [])) > 1 else None,
-                "local_time": ctime,
-            }
-        except Exception:
-            continue
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        for city, data in ex.map(_fetch_weather_one, list(cities)):
+            if data:
+                out[city] = data
     _wx_cache, _wx_ts = out, time.time()
     return out
 
@@ -167,11 +173,11 @@ def fetch_ensemble(cities, is_low=False):
     if cache and time.time() - _ens_ts < 1800:
         return cache
     var = "temperature_2m_min" if is_low else "temperature_2m_max"
-    out = {}
-    for city in cities:
+
+    def one(city):
         loc = station_for(city)
         if not loc:
-            continue
+            return city, None
         lat, lon, _ = loc
         try:
             r = requests.get(ENSEMBLE_API, params={
@@ -187,9 +193,15 @@ def fetch_ensemble(cities, is_low=False):
                 vals = [d[k][i] for k in member_keys if d[k] and d[k][i] is not None]
                 if vals:
                     by_date[dt] = vals
-            out[city] = by_date
+            return city, by_date
         except Exception:
-            continue
+            return city, None
+
+    out = {}
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        for city, data in ex.map(one, list(cities)):
+            if data is not None:
+                out[city] = data
     _ens_cache[key] = out
     _ens_ts = time.time()
     return out

@@ -355,6 +355,23 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def _prewarm():
+    """Warm the slow caches in the background so the first page load is instant."""
+    import threading
+    def run():
+        try:
+            api_weather_edge()
+        except Exception:
+            pass
+        try:
+            api_markets("")
+        except Exception:
+            pass
+        print("caches warmed — dashboard is fast now")
+    threading.Thread(target=run, daemon=True).start()
+
+
 if __name__ == "__main__":
     print(f"Trading Bot app live at http://localhost:{PORT}  (Ctrl+C to stop)")
+    _prewarm()
     HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

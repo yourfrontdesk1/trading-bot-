@@ -287,8 +287,7 @@ function pickCard(r) {
 }
 
 async function loadPredictions() {
-  $("#pick-cards").innerHTML = `<div class="muted">pulling live markets + 31-member GFS ensemble…</div>`;
-  $("#watch-cards").innerHTML = "";
+  $("#top-cards").innerHTML = `<div class="muted">pulling live markets + 82-member GFS+ECMWF ensemble…</div>`;
   const d = await get("/api/weather-edge");
   if (d.error) { $("#pick-cards").innerHTML = `<div class="muted">${d.error}</div>`; return; }
   const c = d.counts || {}, L = d.ledger || {};
