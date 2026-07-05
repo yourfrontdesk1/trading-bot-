@@ -86,6 +86,17 @@ a.mkt:hover{text-decoration:underline}
 .sig-badge.hold{background:var(--panel2);color:var(--muted)}
 .trend-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
 .trend-dot.up{background:var(--green)} .trend-dot.down{background:var(--red)}
+/* stock trade card action + plan */
+.stock.buy{border-color:#1f5a3a} .stock.sell{border-color:#5a1f1f}
+.stock .action{font-size:26px;font-weight:800;line-height:1}
+.stock .action.buy{color:var(--green)} .stock .action.sell{color:var(--red)} .stock .action.hold{color:var(--muted)}
+.stock .plan{display:flex;gap:8px;background:rgba(0,0,0,.28);border-radius:10px;padding:12px;margin:14px 0 4px}
+.stock .plan .p{flex:1;text-align:center}
+.stock .plan .p .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em}
+.stock .plan .p .v{font-size:15px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.stock .plan .p .v.risk{color:var(--amber)} .stock .plan .p .v.stop{color:var(--red)}
+.stock .planline{font-size:12px;color:var(--muted);margin-top:8px}
+.stock .planline b{color:var(--txt)}
 
 /* weather-edge bet cards */
 .edge-head{font-size:13px;font-weight:700;color:var(--green);text-transform:uppercase;

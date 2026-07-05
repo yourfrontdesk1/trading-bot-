@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
 from brokers.polymarket_client import PolymarketClient
-from strategies.momentum import Params, signal
+from strategies.momentum import Params, signal, position_size
 
 PORT = 8080
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -88,11 +88,23 @@ def api_signals():
                     why = "above 200-day trend, waiting for a crossover"
                 else:
                     why = "below 200-day trend — stay out"
+                # trade plan: risk-managed position sizing (1% equity risk, 8% stop)
+                p = Params()
+                try:
+                    equity = alpaca().account_value()
+                except Exception:
+                    equity = 100000
+                qty = position_size(equity, price, p)
+                stop_price = round(price * (1 - p.stop_pct), 2)
+                dollars = round(qty * price, 2)
+                risk_dollars = round(qty * price * p.stop_pct, 2)
                 out.append({"symbol": sym, "price": round(price, 2), "change": change,
                             "spark": spark, "signal": sig, "why": why,
                             "above200": above200,
                             "sma50": round(sma50, 2) if sma50 else None,
-                            "sma200": round(sma200, 2) if sma200 else None})
+                            "sma200": round(sma200, 2) if sma200 else None,
+                            "plan": {"qty": qty, "dollars": dollars, "stop": stop_price,
+                                     "risk": risk_dollars, "stop_pct": int(p.stop_pct * 100)}})
             except Exception:
                 out.append({"symbol": sym, "price": 0, "change": 0, "spark": [],
                             "signal": "?", "why": "", "above200": False})

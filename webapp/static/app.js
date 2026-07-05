@@ -66,19 +66,33 @@ function sparkline(vals, w = 240, h = 46) {
 function stockCard(r) {
   const up = r.change >= 0;
   const sig = (r.signal || "hold");
-  return `<div class="stock">
+  const p = r.plan || {};
+  const actionable = sig === "buy" || sig === "sell";
+  // the trade plan the strategy would execute (or is waiting to)
+  const plan = `<div class="plan">
+      <div class="p"><div class="k">Size</div><div class="v">${p.qty || 0} sh</div></div>
+      <div class="p"><div class="k">≈ Amount</div><div class="v">$${Number(p.dollars || 0).toLocaleString()}</div></div>
+      <div class="p"><div class="k">Stop ${p.stop_pct}%</div><div class="v stop">$${p.stop || 0}</div></div>
+      <div class="p"><div class="k">Risk</div><div class="v risk">$${Number(p.risk || 0).toLocaleString()}</div></div>
+    </div>`;
+  const line = actionable
+    ? `<div class="planline">✅ <b>${sig.toUpperCase()} ${p.qty} ${r.symbol}</b> now · exit if it drops to <b>$${p.stop}</b></div>`
+    : `<div class="planline">⏸ Waiting. If it triggers, plan is <b>buy ${p.qty} @ ~$${r.price}</b>, stop <b>$${p.stop}</b> (risk $${Number(p.risk || 0).toLocaleString()})</div>`;
+  return `<div class="stock ${sig}">
     <div class="row1">
-      <div class="sym">${r.symbol}</div>
+      <div>
+        <div class="sym">${r.symbol}</div>
+        <div class="action ${sig}">${sig === "hold" ? "HOLD" : sig.toUpperCase()}</div>
+      </div>
       <div style="text-align:right">
         <div class="price">$${Number(r.price).toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
         <div class="chg ${up ? "up" : "down"}">${up ? "▲" : "▼"} ${up ? "+" : ""}${r.change}%</div>
       </div>
     </div>
     <div class="spark">${sparkline(r.spark)}</div>
-    <div class="foot">
-      <div class="why"><span class="trend-dot ${r.above200 ? "up" : "down"}"></span>${r.why || ""}</div>
-      <div class="sig-badge ${sig}">${sig.toUpperCase()}</div>
-    </div>
+    <div class="why"><span class="trend-dot ${r.above200 ? "up" : "down"}"></span>${r.why || ""}</div>
+    ${plan}
+    ${line}
   </div>`;
 }
 
