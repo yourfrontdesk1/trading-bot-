@@ -265,7 +265,7 @@ function pickCard(r) {
           ${act}
         </div>
         <div class="q">${r.question}</div>
-        <div style="margin-top:6px">${stn}<span class="ens"> · ${r.members} GFS sims · ${r.lead_days}d out</span></div>
+        <div style="margin-top:6px">${stn}<span class="ens"> · ${r.members} sims (GFS+ECMWF) · ${r.lead_days}d out</span></div>
       </div>
       <div class="kelly"><div class="amt">$${r.bet_usd || "—"}</div><div class="lbl">¼-Kelly bet</div></div>
     </div>

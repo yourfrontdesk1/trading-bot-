@@ -38,6 +38,8 @@ TAKER_FEE_RATE = 0.02          # market orders cost ~feeRate * min(p,1-p); we av
 MIN_SHARES = 5                 # Polymarket minimum order size
 MAX_LEAD_DAYS = 3              # forecasts past ~3 days are too noisy to trust
 MAX_EXPOSURE = 0.6             # never risk more than 60% of bankroll at once
+ENSEMBLE_MODELS = "gfs025,ecmwf_ifs025"  # blend GFS (31) + ECMWF (51) = 82 members
+CALIBRATION = 0.82            # ensembles are overconfident; shrink toward 0.5 (90% -> ~83%)
 
 PATTERN = re.compile(
     r"(?P<kind>highest|lowest) temperature in (?P<city>[\w\s]+?) be (?P<threshold>\d+)\s*°?[CF]"
@@ -174,8 +176,8 @@ def fetch_ensemble(cities, is_low=False):
         try:
             r = requests.get(ENSEMBLE_API, params={
                 "latitude": lat, "longitude": lon, "daily": var,
-                "models": "gfs025", "forecast_days": 5, "timezone": "auto"},
-                headers={"User-Agent": "tradingbot/0.2"}, timeout=20)
+                "models": ENSEMBLE_MODELS, "forecast_days": 5, "timezone": "auto"},
+                headers={"User-Agent": "tradingbot/0.2"}, timeout=25)
             r.raise_for_status()
             d = r.json().get("daily", {})
             dates = d.get("time", [])
@@ -204,11 +206,16 @@ def bucket_hits(members, parsed):
 
 
 def bucket_probability(members, parsed):
-    """P(YES) from the empirical ensemble distribution for this market."""
+    """P(YES) from the empirical ensemble distribution, then CALIBRATED.
+
+    Raw ensemble fractions are overconfident (underdispersive), so we shrink
+    toward 0.5 by CALIBRATION — the research found claimed 90% ~= real 80%.
+    """
     if not members:
         return None
-    p = bucket_hits(members, parsed) / len(members)
-    return min(0.98, max(0.02, p))  # 31 members can't prove certainty
+    raw = bucket_hits(members, parsed) / len(members)
+    cal = 0.5 + (raw - 0.5) * CALIBRATION
+    return min(0.97, max(0.03, cal))
 
 
 def build_reasoning(parsed, members, p_yes, pe, lead, station_ok):
@@ -221,7 +228,8 @@ def build_reasoning(parsed, members, p_yes, pe, lead, station_ok):
     mkt_pct = round((pe["p_market"] or 0) * 100)
     edge_pts = round((pe["edge"] or 0) * 100)
     kind = "at or above" if parsed["or_higher"] else "at or below" if parsed["or_below"] else "exactly at"
-    yes_desc = f"{hits} of {n} forecast simulations land {kind} {parsed['threshold_c']}°C"
+    yes_desc = (f"{hits} of {n} forecast simulations (GFS + ECMWF ensembles) land "
+                f"{kind} {parsed['threshold_c']}°C")
 
     if side == "YES":
         call = f"the temperature WILL hit the target, so back YES"
