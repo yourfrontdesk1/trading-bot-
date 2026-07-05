@@ -10,14 +10,12 @@ adaptive thinking. Returns {direction, confidence, rationale, findings}.
 """
 import json
 import re
+import subprocess
 
 import config
 
-try:
-    import anthropic
-    _SDK = True
-except ImportError:
-    _SDK = False
+# Runs through the local `claude` CLI (your Claude Code login) — NOT the paid
+# Console API key. No per-token console charges.
 
 _SYSTEM = """You are a disciplined trading analyst. You are given one instrument
 (a stock or a prediction market) and must form a view using CURRENT, real-world
@@ -51,46 +49,36 @@ def _extract_json(text):
 
 
 def analyze(subject: str, kind: str = "stock", context: str = "") -> dict:
-    """subject: e.g. 'NVDA' or a Polymarket question. Returns a decision dict."""
-    if not _SDK:
-        return {"error": "anthropic SDK not installed"}
-    if not config.ANTHROPIC_API_KEY:
-        return {"error": "no ANTHROPIC_API_KEY in .env"}
+    """subject: e.g. 'NVDA' or a Polymarket question. Returns a decision dict.
 
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    Uses the local `claude` CLI (your Claude Code session) with web search —
+    no Console API key, no per-token charges.
+    """
     label = "stock ticker" if kind == "stock" else "prediction market"
-    user = f"Analyze this {label}: {subject}\n{context}\nForm a view for a short-term trade."
-
-    messages = [{"role": "user", "content": user}]
-    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}]
-
-    final = None
-    for _ in range(6):  # allow server-tool pause_turn continuations
-        resp = client.messages.create(
-            model=config.AGENT_MODEL,
-            max_tokens=4000,
-            thinking={"type": "adaptive"},
-            system=_SYSTEM,
-            tools=tools,
-            messages=messages,
+    prompt = (
+        f"{_SYSTEM}\n\n---\nAnalyze this {label}: {subject}\n{context}\n"
+        "Search the web for current information, then give your view for a short-term trade. "
+        "Output ONLY the JSON object described above as your final message."
+    )
+    try:
+        proc = subprocess.run(
+            ["claude", "-p", prompt,
+             "--allowedTools", "WebSearch,WebFetch",
+             "--max-turns", "10"],
+            capture_output=True, text=True, timeout=240,
         )
-        if resp.stop_reason == "pause_turn":
-            messages = [{"role": "user", "content": user},
-                        {"role": "assistant", "content": resp.content}]
-            continue
-        final = resp
-        break
+    except FileNotFoundError:
+        return {"error": "claude CLI not found on PATH", "direction": "hold", "confidence": 0}
+    except subprocess.TimeoutExpired:
+        return {"error": "analysis timed out", "direction": "hold", "confidence": 0}
 
-    if final is None:
-        return {"error": "agent did not finish"}
-    if final.stop_reason == "refusal":
-        return {"error": "model refused", "direction": "hold", "confidence": 0}
-
-    text = "".join(b.text for b in final.content if b.type == "text")
+    text = (proc.stdout or "").strip()
+    if not text:
+        return {"error": (proc.stderr or "no output")[:200], "direction": "hold", "confidence": 0}
     parsed = _extract_json(text)
     if not parsed:
         return {"error": "no decision parsed", "raw": text[:300], "direction": "hold", "confidence": 0}
-    parsed["model"] = config.AGENT_MODEL
+    parsed["model"] = "claude-code (local session)"
     return parsed
 
 
