@@ -67,6 +67,26 @@ a.mkt:hover{text-decoration:underline}
 .badge.filled{background:rgba(34,197,94,.15);color:var(--green)}
 .badge.pending,.badge.new,.badge.accepted{background:rgba(245,158,11,.15);color:var(--amber)}
 
+/* stock cards */
+.stock-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:900px){.stock-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.stock-grid{grid-template-columns:1fr}}
+.stock{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+.stock .row1{display:flex;justify-content:space-between;align-items:baseline}
+.stock .sym{font-size:20px;font-weight:800}
+.stock .price{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.stock .chg{font-size:13px;font-weight:600}
+.stock .chg.up{color:var(--green)} .stock .chg.down{color:var(--red)}
+.stock .spark{margin:12px 0 14px}
+.stock .foot{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.stock .why{color:var(--muted);font-size:12px;flex:1}
+.sig-badge{font-size:12px;font-weight:800;padding:5px 12px;border-radius:8px;letter-spacing:.04em}
+.sig-badge.buy{background:rgba(34,197,94,.15);color:var(--green)}
+.sig-badge.sell{background:rgba(239,68,68,.15);color:var(--red)}
+.sig-badge.hold{background:var(--panel2);color:var(--muted)}
+.trend-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.trend-dot.up{background:var(--green)} .trend-dot.down{background:var(--red)}
+
 /* weather-edge bet cards */
 .edge-head{font-size:13px;font-weight:700;color:var(--green);text-transform:uppercase;
   letter-spacing:.06em;margin-bottom:14px}

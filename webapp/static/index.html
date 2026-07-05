@@ -57,10 +57,9 @@
 
     <!-- STOCKS -->
     <section id="stocks" class="view">
-      <div class="panel"><h2>Watchlist signals</h2>
-        <table id="sig-table"><thead><tr><th>Symbol</th><th>Price</th><th>Signal</th></tr></thead><tbody></tbody></table>
-      </div>
-      <div class="panel"><h2>Open positions</h2>
+      <div class="edge-head" style="color:var(--accent)">📈 Watchlist <span id="stk-sub" class="muted"></span></div>
+      <div id="stock-cards" class="stock-grid"></div>
+      <div class="panel" style="margin-top:22px"><h2>Open positions</h2>
         <table id="pos-table"><thead><tr><th>Symbol</th><th>Qty</th><th>Value</th><th>P/L</th></tr></thead><tbody></tbody></table>
       </div>
     </section>

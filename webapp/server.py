@@ -75,13 +75,27 @@ def api_signals():
                 closes = [b.close for b in bars]
                 spark = [round(c, 2) for c in closes[-60:]]
                 change = round((closes[-1] / closes[-2] - 1) * 100, 2) if len(closes) > 1 else 0
-                out.append({"symbol": sym,
-                            "price": round(closes[-1], 2) if closes else 0,
-                            "change": change,
-                            "spark": spark,
-                            "signal": signal(closes, Params()) if closes else "?"})
+                sig = signal(closes, Params()) if closes else "?"
+                price = closes[-1] if closes else 0
+                sma50 = sum(closes[-50:]) / 50 if len(closes) >= 50 else None
+                sma200 = sum(closes[-200:]) / 200 if len(closes) >= 200 else None
+                above200 = bool(sma200 and price > sma200)
+                if sig == "buy":
+                    why = "20d crossed above 50d in an uptrend"
+                elif sig == "sell":
+                    why = "20d crossed below 50d — trend broke"
+                elif above200:
+                    why = "above 200-day trend, waiting for a crossover"
+                else:
+                    why = "below 200-day trend — stay out"
+                out.append({"symbol": sym, "price": round(price, 2), "change": change,
+                            "spark": spark, "signal": sig, "why": why,
+                            "above200": above200,
+                            "sma50": round(sma50, 2) if sma50 else None,
+                            "sma200": round(sma200, 2) if sma200 else None})
             except Exception:
-                out.append({"symbol": sym, "price": 0, "change": 0, "spark": [], "signal": "?"})
+                out.append({"symbol": sym, "price": 0, "change": 0, "spark": [],
+                            "signal": "?", "why": "", "above200": False})
     except Exception as e:
         return {"error": str(e)[:80], "rows": []}
     return {"rows": out}

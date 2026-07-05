@@ -43,11 +43,54 @@ async function loadOverview() {
            v => v >= 100 ? "var(--green)" : "var(--accent)");
 }
 
+// inline SVG sparkline; green if series rose over the window, red if it fell
+function sparkline(vals, w = 240, h = 46) {
+  if (!vals || vals.length < 2) return "";
+  const min = Math.min(...vals), max = Math.max(...vals), span = max - min || 1;
+  const x = i => (i / (vals.length - 1)) * w;
+  const y = v => h - 4 - ((v - min) / span) * (h - 8);
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const up = vals[vals.length - 1] >= vals[0];
+  const col = up ? "var(--green)" : "var(--red)";
+  const area = `M0,${h} L${vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" L")} L${w},${h} Z`;
+  const gid = "g" + Math.floor(x(vals[0]) * 1000) + vals.length;
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none">
+    <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="${col}" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
+    <path d="${area}" fill="url(#${gid})"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2"
+      stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+function stockCard(r) {
+  const up = r.change >= 0;
+  const sig = (r.signal || "hold");
+  return `<div class="stock">
+    <div class="row1">
+      <div class="sym">${r.symbol}</div>
+      <div style="text-align:right">
+        <div class="price">$${Number(r.price).toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+        <div class="chg ${up ? "up" : "down"}">${up ? "▲" : "▼"} ${up ? "+" : ""}${r.change}%</div>
+      </div>
+    </div>
+    <div class="spark">${sparkline(r.spark)}</div>
+    <div class="foot">
+      <div class="why"><span class="trend-dot ${r.above200 ? "up" : "down"}"></span>${r.why || ""}</div>
+      <div class="sig-badge ${sig}">${sig.toUpperCase()}</div>
+    </div>
+  </div>`;
+}
+
 async function loadStocks() {
+  $("#stock-cards").innerHTML = `<div class="muted">loading prices…</div>`;
   const s = await get("/api/signals");
-  $("#sig-table tbody").innerHTML = (s.rows || []).map(r =>
-    `<tr><td>${r.symbol}</td><td>$${Number(r.price).toLocaleString()}</td>${sigCell(r.signal)}</tr>`
-  ).join("") || `<tr><td colspan=3>${s.error || "no data"}</td></tr>`;
+  const rows = s.rows || [];
+  const active = rows.filter(r => r.signal === "buy" || r.signal === "sell").length;
+  $("#stk-sub").textContent = `${rows.length} tracked · ${active} with an active signal · ${rows.length - active} holding`;
+  $("#stock-cards").innerHTML = rows.length
+    ? rows.map(stockCard).join("")
+    : `<div class="muted">${s.error || "no data"}</div>`;
   const p = await get("/api/positions");
   $("#pos-table tbody").innerHTML = (p.rows || []).length ? p.rows.map(r =>
     `<tr><td>${r.symbol}</td><td>${r.qty}</td><td>$${Number(r.value).toLocaleString()}</td>
