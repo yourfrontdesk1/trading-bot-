@@ -190,9 +190,31 @@ a.mkt:hover{text-decoration:underline}
 .watch-row .wq{flex:1;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .watch-row .we{font-weight:700;font-variant-numeric:tabular-nums}
 
-.edge-head{font-size:12px;font-weight:800;color:var(--txt);text-transform:uppercase;
-  letter-spacing:.08em;margin-bottom:15px;display:flex;align-items:center;gap:6px}
+.edge-head{font-size:12.5px;font-weight:800;color:var(--txt);text-transform:uppercase;
+  letter-spacing:.08em;margin-bottom:16px;display:flex;align-items:center;gap:6px}
 .edge-head .muted{color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0}
+
+/* polybot-style big confidence cards */
+.top-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-bottom:8px}
+@media(max-width:900px){.top-grid{grid-template-columns:1fr}}
+.bet{position:relative;border-radius:18px;padding:24px;overflow:hidden;box-shadow:var(--shadow)}
+.bet.no{background:linear-gradient(155deg,#0d1f16,#0b1410);border:1px solid #1f5a3a}
+.bet.yes{background:linear-gradient(155deg,#0d1f16,#0b1410);border:1px solid #1f5a3a}
+.bet .rank{position:absolute;top:14px;right:22px;font-size:88px;font-weight:800;
+  color:rgba(52,211,153,.14);line-height:1}
+.bet .side{font-size:52px;font-weight:800;line-height:1;letter-spacing:-.03em}
+.bet .side.no{color:var(--red)} .bet .side.yes{color:var(--green)}
+.bet .loc{color:var(--muted);font-size:13px;margin:8px 0 14px}
+.bet .loc b{color:var(--txt)}
+.bet .q{font-size:16px;font-weight:600;margin-bottom:18px;line-height:1.4;min-height:44px}
+.bet .stats{display:flex;gap:6px;background:rgba(0,0,0,.4);border-radius:12px;padding:16px 8px;margin-bottom:18px}
+.bet .stat{flex:1;text-align:center}
+.bet .stat .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+.bet .stat .v{font-size:24px;font-weight:800;margin-top:5px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.bet .stat .v.g{color:var(--green)}
+.bet .btn{display:block;text-align:center;background:var(--accent);color:#fff;font-weight:700;
+  padding:15px;border-radius:12px;text-decoration:none;font-size:15px;transition:.16s}
+.bet .btn:hover{background:#5878ef;transform:translateY(-1px)}
 
 /* the pick card — the hero of the app */
 .pick{background:linear-gradient(180deg,var(--panel),#0f1219);border:1px solid var(--line);

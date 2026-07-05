@@ -224,19 +224,20 @@ const tagClass = s => /LOCKED/.test(s) ? "locked" : /STRONG/.test(s) ? "strong" 
 
 function topCard(r, i) {
   const side = (r.best_side || "").toLowerCase();
-  const price = r.best_side === "YES" ? r.yes_price : r.no_price;
-  const stake = 14, wins = price ? Math.round(stake / price) : 0;
-  return `<div class="bet">
+  const win = Math.round((side === "yes" ? r.model_prob : 1 - r.model_prob) * 100);
+  const price = r.p_market || 0;
+  const wins = price ? Math.round(10 / price) : 0;  // £10 stake payout
+  return `<div class="bet ${side}">
     <div class="rank">${i + 1}</div>
     <div class="side ${side}">${r.best_side}</div>
-    <div class="loc">on <b>${r.city} ${r.threshold_c}°</b> · ${r.date_str}</div>
+    <div class="loc">on <b>${r.city} ${r.threshold_c}°</b> · ${r.date_str} · <span class="conf ${confClass(r.confidence)}">${r.confidence}</span></div>
     <div class="q">${r.question}</div>
     <div class="stats">
-      <div class="stat"><div class="k">Win chance</div><div class="v g">${Math.round((r.p_win || 0) * 100)}%</div></div>
-      <div class="stat"><div class="k">Price</div><div class="v">${cents(price)}</div></div>
-      <div class="stat"><div class="k">$${stake} → wins</div><div class="v g">$${wins}</div></div>
+      <div class="stat"><div class="k">Our prediction</div><div class="v g">${win}%</div></div>
+      <div class="stat"><div class="k">Market price</div><div class="v">${cents(price)}</div></div>
+      <div class="stat"><div class="k">£10 → wins</div><div class="v g">£${wins}</div></div>
     </div>
-    <a class="btn" href="${r.poly_url}" target="_blank">Place ${r.best_side} bet on Polymarket →</a>
+    <a class="btn" href="${r.poly_url}" target="_blank">Back ${r.best_side} on Polymarket →</a>
   </div>`;
 }
 
@@ -298,9 +299,12 @@ async function loadPredictions() {
     <div class="lstat"><div class="k">Win rate</div><div class="v">${L.win_rate != null ? L.win_rate + "%" : "—"}</div></div>
     <div class="lstat"><div class="k">Avg edge</div><div class="v">${L.avg_edge != null ? Math.round(L.avg_edge * 100) + "¢" : "—"}</div></div>
     <div class="lnote">${L.note || ""}</div>`;
-  $("#pick-cards").innerHTML = (d.picks || []).length
-    ? d.picks.map(pickCard).join("")
-    : `<div class="muted">No edges this scan — the model found no liquid market it disagrees with. Check back; markets and forecasts move hourly.</div>`;
+  const picks = d.picks || [];
+  $("#top-cards").innerHTML = picks.length
+    ? picks.slice(0, 4).map((r, i) => topCard(r, i)).join("")
+    : `<div class="muted">No edges this scan — the model found no liquid market it disagrees with. Markets and forecasts move hourly; check back.</div>`;
+  $("#pick-cards").innerHTML = picks.map(pickCard).join("")
+    || `<div class="muted">Nothing to break down right now.</div>`;
 }
 
 async function loadLab() {
