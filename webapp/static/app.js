@@ -322,14 +322,18 @@ async function loadPredictions() {
     $("#top-cards").innerHTML = $("#pick-cards").innerHTML = `<div class="muted">${esc(d.error)}</div>`;
     return;
   }
-  const c = d.counts || {}, L = d.ledger || {};
+  const c = d.counts || {}, L = d.ledger || {}, cal = d.calibration || {};
   $("#picks-sub").textContent = `${c.actionable || 0} actionable · ${c.liquid || 0} liquid · ${c.total || 0} scanned`;
+  const learnNote = cal.resolved
+    ? `🧠 Self-learning: Brier ${cal.brier} (lower = sharper). ` +
+      cal.buckets.map(b => `predicted ${b.predicted}% → won ${b.actual}%`).join(" · ")
+    : (L.note || "");
   $("#ledger-banner").innerHTML = `
     <div class="lstat"><div class="k">Bets logged</div><div class="v">${L.logged ?? 0}</div></div>
     <div class="lstat"><div class="k">Resolved</div><div class="v">${L.resolved ?? 0}</div></div>
     <div class="lstat"><div class="k">Win rate</div><div class="v">${L.win_rate != null ? L.win_rate + "%" : "—"}</div></div>
-    <div class="lstat"><div class="k">Avg edge</div><div class="v">${L.avg_edge != null ? Math.round(L.avg_edge * 100) + "¢" : "—"}</div></div>
-    <div class="lnote">${L.note || ""}</div>`;
+    <div class="lstat"><div class="k">Calibration</div><div class="v">${cal.brier != null ? cal.brier : "—"}</div></div>
+    <div class="lnote">${learnNote}</div>`;
   const picks = d.picks || [];
   $("#top-cards").innerHTML = picks.length
     ? picks.slice(0, 4).map((r, i) => topCard(r, i)).join("")

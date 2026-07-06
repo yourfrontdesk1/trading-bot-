@@ -53,6 +53,102 @@ def log_scan(actionable_rows, ts):
     return added
 
 
+def resolve_pending(today_iso):
+    """Self-learning core: for every logged bet whose date has passed, fetch the
+    ACTUAL temperature that occurred and record win/loss. This turns the paper
+    ledger into a real, growing track record with zero human input.
+
+    today_iso: 'YYYY-MM-DD' (module can't read the clock itself)."""
+    import requests
+    from strategies.weather_edge import (parse_question, station_for, _ometeo_unit,
+                                          FORECAST_API)
+    if not os.path.exists(LEDGER):
+        return 0
+    rows = []
+    with open(LEDGER) as f:
+        for line in f:
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+    resolved = 0
+    for r in rows:
+        if r.get("resolved") or not r.get("market_date"):
+            continue
+        if r["market_date"] >= today_iso:   # not settled yet
+            continue
+        parsed = parse_question(r.get("question", ""))
+        loc = station_for(r.get("city", ""))
+        if not parsed or not loc:
+            continue
+        lat, lon, _ = loc
+        is_low = parsed["kind"] == "lowest"
+        var = "temperature_2m_min" if is_low else "temperature_2m_max"
+        try:
+            resp = requests.get(FORECAST_API, params={
+                "latitude": lat, "longitude": lon, "daily": var,
+                "start_date": r["market_date"], "end_date": r["market_date"],
+                "timezone": "auto", "temperature_unit": _ometeo_unit(parsed.get("unit", "C")),
+            }, timeout=15)
+            resp.raise_for_status()
+            vals = resp.json().get("daily", {}).get(var, [])
+            actual = vals[0] if vals else None
+        except Exception:
+            continue
+        if actual is None:
+            continue
+        T = parsed["threshold_c"]
+        if parsed["or_higher"]:
+            yes = actual >= T
+        elif parsed["or_below"]:
+            yes = actual <= T + 0.99
+        else:
+            yes = T <= actual < T + 1
+        outcome_side = "YES" if yes else "NO"
+        r["resolved"] = True
+        r["actual_temp"] = round(actual, 1)
+        r["won"] = (r.get("side") == outcome_side)
+        resolved += 1
+    if resolved:
+        with open(LEDGER, "w") as f:
+            for r in rows:
+                f.write(json.dumps(r) + "\n")
+    return resolved
+
+
+def calibration():
+    """How well-calibrated are we? Compare predicted win-prob to actual outcomes.
+    Returns a learning summary the model uses to self-correct."""
+    if not os.path.exists(LEDGER):
+        return {"resolved": 0, "brier": None, "buckets": []}
+    rows = []
+    with open(LEDGER) as f:
+        for line in f:
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+    res = [r for r in rows if r.get("resolved") and r.get("model_prob") is not None]
+    if not res:
+        return {"resolved": 0, "brier": None, "buckets": []}
+    # Brier score: mean( (predicted_win_prob - won)^2 ); lower is better
+    def pwin(r):
+        p = r["model_prob"]
+        return p if r.get("side") == "YES" else 1 - p
+    brier = sum((pwin(r) - (1 if r["won"] else 0)) ** 2 for r in res) / len(res)
+    # calibration buckets: predicted band vs actual hit-rate
+    bands = [(0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.01)]
+    buckets = []
+    for lo, hi in bands:
+        b = [r for r in res if lo <= pwin(r) < hi]
+        if b:
+            buckets.append({"band": f"{int(lo*100)}-{int(hi*100)}%",
+                            "predicted": round(sum(pwin(r) for r in b) / len(b) * 100),
+                            "actual": round(sum(1 for r in b if r["won"]) / len(b) * 100),
+                            "n": len(b)})
+    return {"resolved": len(res), "brier": round(brier, 3), "buckets": buckets}
+
+
 def stats():
     """Summary of the paper track record so far."""
     if not os.path.exists(LEDGER):

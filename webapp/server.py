@@ -293,8 +293,10 @@ def _api_weather_edge():
                       if r.get("liquid") and r.get("model_prob") is not None
                       and (r.get("edge") or 0) > 0.03]
         candidates.sort(key=lambda r: -(r.get("edge") or 0))
+        now = datetime.now()
         try:
-            ledger.log_scan(actionable, datetime.now().isoformat(timespec="seconds"))
+            ledger.log_scan(actionable, now.isoformat(timespec="seconds"))
+            ledger.resolve_pending(now.strftime("%Y-%m-%d"))  # self-learning: settle past bets
         except Exception:
             pass
         return {"picks": candidates[:12],
@@ -303,7 +305,8 @@ def _api_weather_edge():
                            "candidates": len(candidates),
                            "liquid": sum(1 for r in rows if r.get("liquid")),
                            "total": len(rows)},
-                "ledger": ledger.stats()}
+                "ledger": ledger.stats(),
+                "calibration": ledger.calibration()}
     except Exception as e:
         return {"error": str(e)[:150], "picks": [], "upcoming": [], "counts": {}, "ledger": {}}
 
