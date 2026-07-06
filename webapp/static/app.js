@@ -1,7 +1,7 @@
 // Trading Bot SPA — fetches the JSON API and renders each view.
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const TITLES = {overview: "Overview", trades: "Trades", stocks: "Stocks", predictions: "Weather edge", calendar: "Calendar", aipicks: "AI research", markets: "All markets", lab: "Strategy Lab"};
+const TITLES = {overview: "Overview", trades: "Trades", stocks: "Stocks", predictions: "Weather edge", aipicks: "AI research", markets: "All markets", lab: "Strategy Lab"};
 
 async function get(path) {
   try { const r = await fetch(path); return await r.json(); }
@@ -338,6 +338,7 @@ async function loadPredictions() {
   $("#top-cards").innerHTML = picks.length
     ? picks.slice(0, 4).map((r, i) => topCard(r, i)).join("")
     : `<div class="muted">No edges this scan — the model found no liquid market it disagrees with. Markets and forecasts move hourly; check back.</div>`;
+  renderCalendar(d.upcoming || []);
   $("#pick-cards").innerHTML = picks.map(pickCard).join("")
     || `<div class="muted">Nothing to break down right now.</div>`;
   $$(".calcin").forEach(calcBet);  // show default £1 calc on every card
@@ -403,12 +404,9 @@ function dayLabel(lead, dateStr) {
   } catch { return dateStr; }
 }
 
-async function loadCalendar() {
-  $("#cal-content").innerHTML = `<div class="muted">building the calendar…</div>`;
-  const d = await get("/api/weather-edge");
-  const up = (d.upcoming || []).filter(r => r.market_date);
-  if (!up.length) { $("#cal-content").innerHTML = `<div class="muted">No upcoming bets found.</div>`; return; }
-  // group by date
+function renderCalendar(upcoming) {
+  const up = (upcoming || []).filter(r => r.market_date);
+  if (!up.length) { $("#cal-content").innerHTML = `<div class="muted">No upcoming bets.</div>`; $("#cal-sub").textContent = ""; return; }
   const byDate = {};
   up.forEach(r => { (byDate[r.market_date] ||= []).push(r); });
   const dates = Object.keys(byDate).sort();
@@ -467,7 +465,7 @@ async function pollAI() {
   if (d.running) setTimeout(pollAI, 4000); else aiPolling = false;
 }
 
-const LOADERS = {overview: loadOverview, trades: loadTrades, stocks: loadStocks, predictions: loadPredictions, calendar: loadCalendar, aipicks: loadAIPicks, markets: () => loadMarkets(false), lab: loadLab};
+const LOADERS = {overview: loadOverview, trades: loadTrades, stocks: loadStocks, predictions: loadPredictions, aipicks: loadAIPicks, markets: () => loadMarkets(false), lab: loadLab};
 let current = "overview";
 
 function show(view) {

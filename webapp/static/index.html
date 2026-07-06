@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>Trading Bot</title>
-<link rel="stylesheet" href="/style.css?v=9">
+<link rel="stylesheet" href="/style.css?v=10">
 </head>
 <body>
 <div class="app">
@@ -16,7 +16,6 @@
     <a data-view="trades">Trades</a>
     <a data-view="stocks">Stocks</a>
     <a data-view="predictions">Weather edge</a>
-    <a data-view="calendar">Calendar</a>
     <a data-view="aipicks">AI research</a>
     <a data-view="markets">All markets</a>
     <a data-view="lab">Strategy Lab</a>
@@ -82,14 +81,10 @@
       <div id="ledger-banner" class="ledger"></div>
       <div class="edge-head">⭐ Top bets right now <span id="picks-sub" class="muted"></span></div>
       <div id="top-cards" class="top-grid"></div>
+      <div class="edge-head" style="margin-top:28px">📅 Upcoming bets by day <span id="cal-sub" class="muted"></span></div>
+      <div id="cal-content"></div>
       <div class="edge-head" style="margin-top:28px">📋 Full breakdown — research, call & confidence</div>
       <div id="pick-cards"></div>
-    </section>
-
-    <!-- CALENDAR — all upcoming bets by date -->
-    <section id="calendar" class="view">
-      <div class="edge-head">📅 Upcoming bets by day <span id="cal-sub" class="muted"></span></div>
-      <div id="cal-content"></div>
     </section>
 
     <!-- AI RESEARCH — Claude researches world-event markets before betting -->
@@ -119,6 +114,6 @@
     </section>
   </main>
 </div>
-<script src="/app.js?v=9"></script>
+<script src="/app.js?v=10"></script>
 </body>
 </html>
