@@ -18,6 +18,7 @@ Still NOT a money printer — the goal is proving positive CLV before scaling.
 import re
 import json
 import time
+import math
 from datetime import datetime, date
 from concurrent.futures import ThreadPoolExecutor
 
@@ -40,7 +41,9 @@ MIN_SHARES = 5                 # Polymarket minimum order size
 MAX_LEAD_DAYS = 3              # forecasts past ~3 days are too noisy to trust
 MAX_EXPOSURE = 0.6             # never risk more than 60% of bankroll at once
 ENSEMBLE_MODELS = "gfs025,ecmwf_ifs025"  # blend GFS (31) + ECMWF (51) = 82 members
-CALIBRATION = 0.82            # ensembles are overconfident; shrink toward 0.5 (90% -> ~83%)
+MEMBER_SIGMA = 1.5           # per-member forecast uncertainty (°); widens the ensemble
+                            # so a threshold far from every member is genuinely ~0%,
+                            # and one inside the spread gets a smooth probability.
 
 PATTERN = re.compile(
     r"(?P<kind>highest|lowest) temperature in (?P<city>[\w\s]+?) be (?P<threshold>\d+)\s*°?(?P<unit>[CF])"
@@ -227,21 +230,38 @@ def bucket_hits(members, parsed):
     return sum(1 for m in members if T <= m < T + 1)  # exact 1-degree bucket
 
 
-def bucket_probability(members, parsed):
-    """P(YES) from the empirical ensemble distribution, then CALIBRATED.
+def _cdf(z):
+    return 0.5 * (1 + math.erf(z / math.sqrt(2)))
 
-    Raw ensemble fractions are overconfident (underdispersive), so we shrink
-    toward the outcome's BASE RATE by CALIBRATION. For wide 'or higher/below'
-    markets the base rate is ~0.5; for a narrow 1-degree 'exact' bucket it's
-    small (~1/12), so shrinking toward 0.5 would WRONGLY inflate near-zero tails
-    into false edges. Shrinking toward the base rate fixes that.
+
+def bucket_probability(members, parsed):
+    """P(YES) as a proper probabilistic forecast.
+
+    Rather than counting hard hits (which makes a threshold just outside every
+    member read as 0, then needs crude 'calibration'), we treat each of the 82
+    members as the centre of a Normal(mean=member, sd=MEMBER_SIGMA) — i.e. 'about
+    27°, give or take 1.5°'. P(YES) = the average over all members of the chance
+    that member's true temperature satisfies the market's condition.
+
+    This captures BOTH sources of uncertainty: disagreement between simulations
+    (the spread) AND each simulation's own forecast error (MEMBER_SIGMA). A
+    threshold far from every member comes out genuinely ~0; one inside the spread
+    gets a smooth, well-calibrated probability. No arbitrary shrink needed.
     """
     if not members:
         return None
-    raw = bucket_hits(members, parsed) / len(members)
-    base = 0.5 if (parsed["or_higher"] or parsed["or_below"]) else 1.0 / 12
-    cal = base + (raw - base) * CALIBRATION
-    return min(0.97, max(0.01, cal))
+    T = parsed["threshold_c"]
+    s = MEMBER_SIGMA
+
+    def p_member(mv):
+        if parsed["or_higher"]:          # true temp >= T
+            return 1 - _cdf((T - mv) / s)
+        if parsed["or_below"]:           # true temp <= T + 0.99
+            return _cdf((T + 0.99 - mv) / s)
+        return _cdf((T + 1 - mv) / s) - _cdf((T - mv) / s)  # exact bucket [T, T+1)
+
+    p = sum(p_member(mv) for mv in members) / len(members)
+    return min(0.97, max(0.005, p))
 
 
 def build_reasoning(parsed, members, p_yes, pe, lead, station_ok):
