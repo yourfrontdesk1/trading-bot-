@@ -272,6 +272,14 @@ a.mkt:hover{text-decoration:underline}
 .gap-note b{color:var(--green)}
 .wx{display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;font-size:12px;color:var(--muted)}
 .wx b{color:var(--txt);font-weight:700}
+.calc{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;
+  background:rgba(109,139,255,.08);border:1px solid rgba(109,139,255,.25);border-radius:10px;padding:12px 14px}
+.calclbl{font-weight:700;font-size:13px}
+.calcin{width:80px;background:var(--panel);border:1px solid var(--line);color:var(--txt);
+  border-radius:8px;padding:7px 10px;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+.calcin:focus{outline:none;border-color:var(--accent)}
+.calcout{font-size:13px;color:var(--muted)}
+.calcout b{color:var(--txt);font-variant-numeric:tabular-nums}
 
 /* charts (inline svg) */
 .bar-row{display:flex;align-items:center;gap:10px;margin:7px 0}

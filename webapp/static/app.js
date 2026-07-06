@@ -246,6 +246,25 @@ function topCard(r, i) {
 
 const confClass = c => ({ High: "hi", Medium: "med", Low: "lo" }[c] || "lo");
 
+// live bet calculator: stake -> shares, payout, profit, expected value
+function calcBet(input) {
+  const stake = parseFloat(input.value) || 0;
+  const price = parseFloat(input.dataset.price) || 0;   // market price of the side (0-1)
+  const model = parseFloat(input.dataset.model) || 0;   // our win probability (0-1)
+  const out = input.parentElement.querySelector(".calcout");
+  if (!stake || !price) { out.innerHTML = ""; return; }
+  const shares = stake / price;
+  const payout = shares;               // each winning share pays £1
+  const profit = payout - stake;
+  const ev = model * payout - stake;   // expected profit using our prediction
+  const evPos = ev >= 0;
+  out.innerHTML =
+    `<b>${shares.toFixed(1)}</b> shares · win pays <b>£${payout.toFixed(2)}</b> ` +
+    `(profit <b class="pos-up">+£${profit.toFixed(2)}</b>) · ` +
+    `expected value <b class="${evPos ? "pos-up" : "pos-down"}">${evPos ? "+" : ""}£${ev.toFixed(2)}</b>`;
+}
+window.calcBet = calcBet;
+
 function pickCard(r) {
   const side = (r.best_side || "").toLowerCase();
   const model = Math.round((r.model_prob != null ? (side === "yes" ? r.model_prob : 1 - r.model_prob) : r.p_win) * 100);
@@ -284,6 +303,13 @@ function pickCard(r) {
       <span>volume <b>$${Number(r.volume_usd || 0).toLocaleString()}</b></span>
       <span><a class="mkt" href="${r.poly_url}" target="_blank">open market →</a></span>
     </div>
+    <div class="calc">
+      <span class="calclbl">💷 Stake £</span>
+      <input class="calcin" type="number" value="1" min="0.1" step="0.5"
+             data-price="${r.p_market}" data-model="${(model / 100).toFixed(3)}"
+             oninput="calcBet(this)" onfocus="calcBet(this)">
+      <span class="calcout"></span>
+    </div>
     <button class="ai-btn" onclick="runAgent('${attr(r.question)}','prediction','${attr('Market prices yes ' + (r.yes_price || '?') + '. Our GFS ensemble model gives ' + model + '% for ' + r.best_side + '.')}', this)">🧠 Deeper AI research on this bet</button>
     <div class="ai-out"></div>
   </div>`;
@@ -310,6 +336,7 @@ async function loadPredictions() {
     : `<div class="muted">No edges this scan — the model found no liquid market it disagrees with. Markets and forecasts move hourly; check back.</div>`;
   $("#pick-cards").innerHTML = picks.map(pickCard).join("")
     || `<div class="muted">Nothing to break down right now.</div>`;
+  $$(".calcin").forEach(calcBet);  // show default £1 calc on every card
 }
 
 async function loadLab() {
