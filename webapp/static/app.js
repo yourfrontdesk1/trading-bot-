@@ -60,20 +60,47 @@ async function loadOverview() {
     ).join("") || `<span class="muted">no data</span>`;
   });
 
-  // weather edges + ledger
+  // weather edges + track record + learning
   get("/api/weather-edge").then(d => {
-    const L = d.ledger || {}, c = d.counts || {};
+    const L = d.ledger || {}, c = d.counts || {}, cal = d.calibration || {};
     $("#ov-edges").textContent = c.actionable ?? "—";
-    $("#ov-logged").textContent = L.logged ?? 0;
-    $("#ov-winrate").textContent = L.win_rate != null ? L.win_rate + "% win rate" : "paper track record";
+    $("#ov-logged").textContent = L.win_rate != null ? L.win_rate + "%" : "—";
+    $("#ov-winrate").textContent = L.resolved ? `${L.wins}/${L.resolved} resolved` : "no bets settled yet";
     const picks = d.picks || [];
-    $("#ov-weather").innerHTML = picks.length ? picks.slice(0, 4).map(r => {
+    $("#ov-weather").innerHTML = picks.length ? picks.slice(0, 5).map(r => {
       const model = Math.round((r.best_side === "YES" ? r.model_prob : 1 - r.model_prob) * 100);
       return `<div class="ov-row"><span class="side ${(r.best_side || "").toLowerCase()}">${r.best_side}</span>
         <a class="ov-q" href="${r.poly_url}" target="_blank">${r.city} ${r.threshold_c}°</a>
         <span class="ov-mid">${model}% vs ${Math.round(r.p_market * 100)}%</span>
         <span class="ov-edge">+${cents(r.edge)}</span></div>`;
     }).join("") : `<span class="muted">No actionable edges right now — the model only fires on real, liquid mispricings.</span>`;
+    // track record area
+    const bucketLine = (cal.buckets || []).map(b => `predicted ${b.predicted}% → won ${b.actual}%`).join("<br>");
+    $("#ov-track").innerHTML = `
+      <div class="ov-row"><span>Bets logged</span><span class="ov-mid">${L.logged ?? 0}</span></div>
+      <div class="ov-row"><span>Resolved</span><span class="ov-mid">${L.resolved ?? 0}</span></div>
+      <div class="ov-row"><span>Win rate</span><span class="ov-mid">${L.win_rate != null ? L.win_rate + "%" : "—"}</span></div>
+      <div class="ov-row"><span>Calibration (Brier)</span><span class="ov-mid">${cal.brier != null ? cal.brier : "—"}</span></div>
+      ${cal.resolved ? `<div class="muted" style="margin-top:8px;font-size:12px">${bucketLine}</div>`
+        : `<div class="muted" style="margin-top:8px;font-size:12px">Learning kicks in once bets settle. Prove ~50-100 before real money.</div>`}`;
+  });
+
+  // AI research area
+  get("/api/ai-picks").then(d => {
+    const res = (d.results || []).slice().sort((a, b) => Math.abs(b.edge || 0) - Math.abs(a.edge || 0));
+    if (d.running) {
+      $("#ov-ai").innerHTML = `<span class="muted">researching world markets… ${d.done}/${d.total}</span>`;
+    } else if (res.length) {
+      $("#ov-ai").innerHTML = res.slice(0, 4).map(r => {
+        const conf = Math.round((r.confidence || 0) * 100);
+        const ed = r.edge != null ? Math.round(r.edge * 100) : null;
+        return `<div class="ov-row"><span class="side ${(r.direction || "").toLowerCase() === "no" ? "no" : "yes"}">${(r.direction || "?").toUpperCase()}</span>
+          <a class="ov-q" href="${r.url}" target="_blank">${esc(r.question)}</a>
+          <span class="ov-mid">${conf}%</span>${ed != null ? `<span class="ov-edge">${ed > 0 ? "+" : ""}${ed}pt</span>` : ""}</div>`;
+      }).join("");
+    } else {
+      $("#ov-ai").innerHTML = `<span class="muted">Not run yet — open the AI research tab and hit ‘Run’ to have Claude read live news on world markets.</span>`;
+    }
   });
 }
 

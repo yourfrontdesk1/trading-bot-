@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>Trading Bot</title>
-<link rel="stylesheet" href="/style.css?v=10">
+<link rel="stylesheet" href="/style.css?v=11">
 </head>
 <body>
 <div class="app">
@@ -32,25 +32,23 @@
       <button id="refresh">↻ Refresh</button>
     </header>
 
-    <!-- OVERVIEW — everything at a glance -->
+    <!-- OVERVIEW — command centre -->
     <section id="overview" class="view active">
       <div class="cards">
         <div class="card"><div class="lbl">Account equity</div><div class="big" id="ov-equity">—</div><div class="sub" id="ov-mode">paper</div></div>
         <div class="card"><div class="lbl">Dry run</div><div class="big" id="ov-dry">—</div><div class="sub">safety switch</div></div>
         <div class="card"><div class="lbl">Weather edges</div><div class="big" id="ov-edges">—</div><div class="sub">actionable now</div></div>
-        <div class="card"><div class="lbl">Bets logged</div><div class="big" id="ov-logged">—</div><div class="sub" id="ov-winrate">paper track record</div></div>
+        <div class="card"><div class="lbl">Win rate</div><div class="big" id="ov-logged">—</div><div class="sub" id="ov-winrate">paper track record</div></div>
       </div>
 
-      <div class="grid">
-        <div>
-          <div class="panel"><h2>🎯 Live weather edges</h2><div id="ov-weather"><span class="muted">loading…</span></div></div>
-          <div class="panel"><h2>📈 Stock signals</h2><div id="ov-stocks"><span class="muted">loading…</span></div></div>
-        </div>
-        <div>
-          <div class="panel"><h2>🌍 Top Polymarket markets</h2><div id="ov-markets"><span class="muted">loading…</span></div></div>
-          <div class="panel"><h2>What the backtest taught us</h2><div id="mini-chart"></div>
-            <div class="muted" style="margin-top:8px">No timing strategy beat Buy &amp; Hold over 7 years. The bot's only real edge is the weather ensemble + the AI analyst.</div></div>
-        </div>
+      <div class="dash">
+        <div class="panel area-wide"><h2>🎯 Top edges right now</h2><div id="ov-weather"><span class="muted">loading…</span></div></div>
+        <div class="panel"><h2>📊 Track record &amp; learning</h2><div id="ov-track"><span class="muted">loading…</span></div></div>
+        <div class="panel"><h2>🧠 AI research</h2><div id="ov-ai"><span class="muted">loading…</span></div></div>
+        <div class="panel"><h2>🌍 Market pulse</h2><div id="ov-markets"><span class="muted">loading…</span></div></div>
+        <div class="panel"><h2>📈 Stocks</h2><div id="ov-stocks"><span class="muted">loading…</span></div></div>
+        <div class="panel area-wide"><h2>📉 What the backtest taught us</h2><div id="mini-chart"></div>
+          <div class="muted" style="margin-top:8px">No timing strategy beat Buy &amp; Hold over 7 years. The bot's only real edge is the weather ensemble + the AI analyst.</div></div>
       </div>
     </section>
 
@@ -114,6 +112,6 @@
     </section>
   </main>
 </div>
-<script src="/app.js?v=10"></script>
+<script src="/app.js?v=11"></script>
 </body>
 </html>

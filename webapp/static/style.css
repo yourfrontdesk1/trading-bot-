@@ -64,6 +64,12 @@ header h1{font-size:26px;font-weight:800;margin:0;flex:0 0 auto;letter-spacing:-
   letter-spacing:.07em;font-weight:700}
 .note{color:var(--muted);max-width:640px;margin:0 0 12px}
 
+/* command-centre area grid */
+.dash{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:820px){.dash{grid-template-columns:1fr}}
+.dash .area-wide{grid-column:1 / -1}
+.dash .panel{margin-bottom:0}
+
 /* overview rows */
 .ov-row{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px}
 .ov-row:last-child{border-bottom:none}
