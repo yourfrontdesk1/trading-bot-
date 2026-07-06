@@ -41,9 +41,11 @@ MIN_SHARES = 5                 # Polymarket minimum order size
 MAX_LEAD_DAYS = 3              # forecasts past ~3 days are too noisy to trust
 MAX_EXPOSURE = 0.6             # never risk more than 60% of bankroll at once
 ENSEMBLE_MODELS = "gfs025,ecmwf_ifs025"  # blend GFS (31) + ECMWF (51) = 82 members
-MEMBER_SIGMA = 1.5           # per-member forecast uncertainty (°); widens the ensemble
-                            # so a threshold far from every member is genuinely ~0%,
-                            # and one inside the spread gets a smooth probability.
+MEMBER_SIGMA = 0.6          # per-member forecast uncertainty (°). TUNED from a 90-day
+                            # historical backtest (backtest_weather.py): 0.6 minimises the
+                            # Brier score — the forecasts are far more accurate than the
+                            # 1.5 we first guessed. Widens each member into a smooth curve
+                            # so a threshold far off is ~0% and one on-target is well-calibrated.
 
 PATTERN = re.compile(
     r"(?P<kind>highest|lowest) temperature in (?P<city>[\w\s]+?) be (?P<threshold>\d+)\s*°?(?P<unit>[CF])"
