@@ -410,23 +410,47 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def _prewarm():
-    """Warm the slow caches in the background so the first page load is instant."""
-    import threading
-    def run():
+def _autopilot():
+    """Runs everything automatically so the user never has to click 'research'.
+    On startup and every few hours: refresh markets/weather (logs + resolves bets)
+    and run the AI research on world markets. All in the background."""
+    import threading, time as _t
+
+    def run_once(reason):
+        # weather scan: logs new bets + auto-resolves settled ones
         try:
+            _cache.pop("weather", None)  # force a fresh scan
             api_weather_edge()
         except Exception:
             pass
         try:
+            _cache.pop("markets", None)
             api_markets("")
         except Exception:
             pass
+        try:
+            if not _ai_state["running"]:
+                _run_ai_research()   # blocks this thread ~6 min; that's fine
+        except Exception:
+            pass
+        print(f"autopilot: {reason} complete")
+
+    def loop():
+        # quick first warm so the page is instant, then a fuller pass
+        try:
+            api_weather_edge(); api_markets("")
+        except Exception:
+            pass
         print("caches warmed — dashboard is fast now")
-    threading.Thread(target=run, daemon=True).start()
+        run_once("startup")
+        while True:
+            _t.sleep(3 * 3600)   # refresh every 3 hours, hands-off
+            run_once("scheduled refresh")
+
+    threading.Thread(target=loop, daemon=True).start()
 
 
 if __name__ == "__main__":
     print(f"Trading Bot app live at http://localhost:{PORT}  (Ctrl+C to stop)")
-    _prewarm()
+    _autopilot()
     HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
