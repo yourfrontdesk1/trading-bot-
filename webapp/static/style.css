@@ -136,6 +136,12 @@ a.mkt:hover{text-decoration:underline}
 .stock .planline{font-size:12px;color:var(--muted);margin-top:8px}
 .stock .planline b{color:var(--txt)}
 
+/* AI research */
+.mkt-go-btn{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff;border:none;
+  border-radius:10px;padding:12px 20px;font-weight:700;cursor:pointer;font-size:14px;transition:.16s}
+.mkt-go-btn:hover:not(:disabled){transform:translateY(-1px)}
+.mkt-go-btn:disabled{opacity:.6;cursor:wait}
+
 /* calendar */
 .calday{margin-bottom:24px}
 .calhead{display:flex;align-items:baseline;gap:12px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--line)}

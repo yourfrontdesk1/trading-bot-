@@ -260,6 +260,49 @@ def _api_markets(search):
         return {"error": str(e)[:150], "rows": []}
 
 
+_ai_state = {"running": False, "results": [], "total": 0, "done": 0, "ts": 0}
+
+
+def _run_ai_research():
+    import time as _t
+    from strategies.agent import analyze
+    _ai_state.update(running=True, results=[], done=0)
+    try:
+        mk = _cached("markets", 180, lambda: _api_markets(""))
+        rows = [r for r in mk.get("rows", [])
+                if "temperature" not in (r.get("question") or "").lower()][:6]
+        _ai_state["total"] = len(rows)
+        for r in rows:
+            pairs = r.get("pairs", [])
+            ctx = "Current market odds: " + ", ".join(
+                f"{o} {round(p * 100)}%" for o, p in pairs) + "."
+            v = analyze(r["question"], "prediction", ctx)
+            side = (v.get("direction") or "").lower()
+            conf = v.get("confidence") or 0
+            mkt_prob = next((p for o, p in pairs if o.lower() == side), None)
+            edge = (round(conf - mkt_prob, 3)
+                    if (mkt_prob is not None and side in ("yes", "no")) else None)
+            _ai_state["results"].append({
+                "question": r["question"], "url": r["url"], "pairs": pairs,
+                "direction": v.get("direction"), "confidence": conf,
+                "rationale": v.get("rationale"), "findings": v.get("findings", []),
+                "market_prob": mkt_prob, "edge": edge, "error": v.get("error"),
+            })
+            _ai_state["done"] += 1
+    finally:
+        _ai_state["running"] = False
+        _ai_state["ts"] = _t.time()
+
+
+def api_ai_picks(query):
+    from urllib.parse import parse_qs
+    import threading
+    if parse_qs(query).get("run") and not _ai_state["running"]:
+        threading.Thread(target=_run_ai_research, daemon=True).start()
+    return {"running": _ai_state["running"], "total": _ai_state["total"],
+            "done": _ai_state["done"], "results": _ai_state["results"]}
+
+
 def api_agent(query):
     """On-demand AI analyst. query: {subject, kind, context}. Slow (web search)."""
     from urllib.parse import parse_qs
@@ -340,6 +383,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(api_agent(query)), "application/json")
         if path == "/api/markets":
             return self._send(200, json.dumps(api_markets(query)), "application/json")
+        if path == "/api/ai-picks":
+            return self._send(200, json.dumps(api_ai_picks(query)), "application/json")
         if path in ROUTES:
             try:
                 data = ROUTES[path]()

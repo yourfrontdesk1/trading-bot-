@@ -1,7 +1,7 @@
 // Trading Bot SPA — fetches the JSON API and renders each view.
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const TITLES = {overview: "Overview", trades: "Trades", stocks: "Stocks", predictions: "Weather edge", calendar: "Calendar", markets: "All markets", lab: "Strategy Lab"};
+const TITLES = {overview: "Overview", trades: "Trades", stocks: "Stocks", predictions: "Weather edge", calendar: "Calendar", aipicks: "AI research", markets: "All markets", lab: "Strategy Lab"};
 
 async function get(path) {
   try { const r = await fetch(path); return await r.json(); }
@@ -424,7 +424,50 @@ async function loadCalendar() {
   }).join("");
 }
 
-const LOADERS = {overview: loadOverview, trades: loadTrades, stocks: loadStocks, predictions: loadPredictions, calendar: loadCalendar, markets: () => loadMarkets(false), lab: loadLab};
+// AI research on world markets
+function aiCard(r) {
+  if (r.error) return `<div class="pick"><div class="q">${esc(r.question)}</div>
+    <div class="muted">⚠ ${esc(r.error)}</div></div>`;
+  const dir = (r.direction || "hold").toLowerCase();
+  const conf = Math.round((r.confidence || 0) * 100);
+  const mkt = r.market_prob != null ? Math.round(r.market_prob * 100) : null;
+  const edgePts = r.edge != null ? Math.round(r.edge * 100) : null;
+  const findings = (r.findings || []).map(f => `<li>${esc(f)}</li>`).join("");
+  const odds = (r.pairs || []).map(p => `<span class="oc">${esc(p[0])} <b>${Math.round(p[1] * 100)}%</b></span>`).join(" ");
+  return `<div class="pick">
+    <div class="top">
+      <div><span class="side ${dir === "no" || dir === "sell" ? "no" : dir === "hold" ? "" : "yes"}" style="font-size:24px">${(r.direction || "HOLD").toUpperCase()}</span>
+        <span class="conf ${conf >= 60 ? "hi" : conf >= 40 ? "med" : "lo"}">${conf}% AI confidence</span></div>
+      ${edgePts != null ? `<div class="kelly"><div class="amt ${edgePts > 0 ? "pos-up" : "pos-down"}">${edgePts > 0 ? "+" : ""}${edgePts}pt</div><div class="lbl">vs market</div></div>` : ""}
+    </div>
+    <div class="q">${esc(r.question)}</div>
+    <div class="reason">${esc(r.rationale || "")}</div>
+    ${findings ? `<ul class="ai-find">${findings}</ul>` : ""}
+    <div class="wx"><span>market odds: ${odds}</span>${mkt != null ? `<span>AI ${conf}% vs market ${mkt}%</span>` : ""}
+      <span><a class="mkt" href="${r.url}" target="_blank">open market →</a></span></div>
+  </div>`;
+}
+
+let aiPolling = false;
+async function loadAIPicks() {
+  const d = await get("/api/ai-picks");
+  const running = d.running, done = d.done || 0, total = d.total || 0;
+  $("#ai-sub").textContent = running ? `researching… ${done}/${total} done` :
+    (d.results || []).length ? `${d.results.length} markets researched` : "not run yet";
+  $("#ai-run").textContent = running ? "🔍 Researching… (~1 min/market)" : "🔍 Run AI research now";
+  $("#ai-run").disabled = running;
+  const res = (d.results || []).slice().sort((a, b) => Math.abs(b.edge || 0) - Math.abs(a.edge || 0));
+  $("#ai-cards").innerHTML = res.length ? res.map(aiCard).join("")
+    : `<div class="muted">${running ? "reading news + web on each market…" : "Click ‘Run AI research’ — Claude will read live news on the top world markets (~1 min each)."}</div>`;
+  if (running && !aiPolling) { aiPolling = true; setTimeout(pollAI, 4000); }
+}
+async function pollAI() {
+  await loadAIPicks();
+  const d = await get("/api/ai-picks");
+  if (d.running) setTimeout(pollAI, 4000); else aiPolling = false;
+}
+
+const LOADERS = {overview: loadOverview, trades: loadTrades, stocks: loadStocks, predictions: loadPredictions, calendar: loadCalendar, aipicks: loadAIPicks, markets: () => loadMarkets(false), lab: loadLab};
 let current = "overview";
 
 function show(view) {
@@ -439,6 +482,7 @@ $$(".sidebar a").forEach(a => a.onclick = () => show(a.dataset.view));
 $("#refresh").onclick = () => show(current);
 $("#mkt-go").onclick = () => loadMarkets(true);
 $("#mkt-q").addEventListener("keydown", e => { if (e.key === "Enter") loadMarkets(true); });
+$("#ai-run").onclick = async () => { await get("/api/ai-picks?run=1"); loadAIPicks(); };
 
 // initial load + auto-refresh the active view every 30s
 show("overview");
