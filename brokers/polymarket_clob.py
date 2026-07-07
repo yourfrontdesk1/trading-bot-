@@ -24,7 +24,9 @@ try:
     from py_clob_client.clob_types import OrderArgs, OrderType
     from py_clob_client.order_builder.constants import BUY
     _CLOB = True
-except ImportError:
+except Exception:
+    # ImportError if not installed, but ALSO TypeError etc. if installed on a
+    # too-old Python (its eth-* deps use 3.10+ syntax). Either way: stay safe/inert.
     _CLOB = False
 
 HOST = "https://clob.polymarket.com"
