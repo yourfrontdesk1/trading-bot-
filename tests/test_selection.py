@@ -3,10 +3,12 @@ the cheap-tail tag, and the ensemble model ids.
 
 Run: venv/bin/python -m tests.test_selection
 """
+import config
 from strategies import weather_edge as we
 from strategies.weather_edge import (is_actionable, bet_features, VOLUME_FLOOR,
                                       TAIL_MAX_PRICE, VALID_ENSEMBLE_MODELS,
-                                      reset_data_status, ensemble_rate_limited)
+                                      reset_data_status, ensemble_rate_limited,
+                                      ometeo_endpoint)
 
 CASES = []
 
@@ -61,11 +63,25 @@ check("no tail tag when price unknown",
 configured = we.ENSEMBLE_MODELS.split(",")
 check("every configured ensemble model id is valid",
       all(m in VALID_ENSEMBLE_MODELS for m in configured))
-check("ICON is in the blend", any("icon" in m for m in configured))
+check("at least one ensemble model configured", len(configured) >= 1)
 
 # ---- data-status flag (honest 'rate limited' vs 'no edge') ----
 reset_data_status()
 check("data status resets to not-rate-limited", ensemble_rate_limited() is False)
+
+# ---- paid-API-key endpoint swap (removes the free daily cap -> runs constantly) ----
+_saved_key = config.OPENMETEO_API_KEY
+config.OPENMETEO_API_KEY = ""
+u, extra = ometeo_endpoint("https://ensemble-api.open-meteo.com/v1/ensemble")
+check("no key -> free URL unchanged", u == "https://ensemble-api.open-meteo.com/v1/ensemble")
+check("no key -> no extra params", extra == {})
+config.OPENMETEO_API_KEY = "TESTKEY123"
+u2, e2 = ometeo_endpoint("https://ensemble-api.open-meteo.com/v1/ensemble")
+check("with key -> uncapped customer host", u2 == "https://customer-ensemble-api.open-meteo.com/v1/ensemble")
+check("with key -> apikey attached", e2 == {"apikey": "TESTKEY123"})
+u3, _ = ometeo_endpoint("https://api.open-meteo.com/v1/forecast")
+check("with key -> forecast host swapped too", u3 == "https://customer-api.open-meteo.com/v1/forecast")
+config.OPENMETEO_API_KEY = _saved_key   # restore
 
 
 if __name__ == "__main__":

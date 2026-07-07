@@ -23,6 +23,10 @@ ALPACA_PAPER = _bool("ALPACA_PAPER", True)
 POLYMARKET_WALLET_KEY = os.getenv("POLYMARKET_WALLET_KEY", "")
 POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com"
 
+# Weather data. With a paid Open-Meteo key the bot uses the uncapped "customer-"
+# endpoints and runs constantly; without it, the free tier's daily cap applies.
+OPENMETEO_API_KEY = os.getenv("OPENMETEO_API_KEY", "")
+
 # Bot behaviour
 DRY_RUN = _bool("DRY_RUN", True)
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))

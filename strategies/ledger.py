@@ -61,13 +61,15 @@ def fetch_actual_temp(lat, lon, var, unit, date_iso):
     most recent days if the archive hasn't ingested them yet. Both queried in the
     market's native unit so the number matches the threshold's units."""
     import requests
-    from strategies.weather_edge import ARCHIVE_API, FORECAST_API, _ometeo_unit
+    from strategies.weather_edge import (ARCHIVE_API, FORECAST_API, _ometeo_unit,
+                                         ometeo_endpoint)
     for api in (ARCHIVE_API, FORECAST_API):
         try:
-            resp = requests.get(api, params={
+            url, extra = ometeo_endpoint(api)
+            resp = requests.get(url, params={
                 "latitude": lat, "longitude": lon, "daily": var,
                 "start_date": date_iso, "end_date": date_iso,
-                "timezone": "auto", "temperature_unit": _ometeo_unit(unit),
+                "timezone": "auto", "temperature_unit": _ometeo_unit(unit), **extra,
             }, timeout=20)
             resp.raise_for_status()
             vals = resp.json().get("daily", {}).get(var, [])

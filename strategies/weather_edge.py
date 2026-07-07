@@ -25,6 +25,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+import config
+
 GAMMA = "https://gamma-api.polymarket.com"
 FORECAST_API = "https://api.open-meteo.com/v1/forecast"
 ENSEMBLE_API = "https://ensemble-api.open-meteo.com/v1/ensemble"
@@ -53,11 +55,12 @@ TAKER_FEE_RATE = 0.02          # market orders cost ~feeRate * min(p,1-p); we av
 MIN_SHARES = 5                 # Polymarket minimum order size
 MAX_LEAD_DAYS = 3              # forecasts past ~3 days are too noisy to trust
 MAX_EXPOSURE = 0.6             # never risk more than 60% of bankroll at once
-# 3-model blend GFS(31)+ECMWF(51)+ICON(40) = 122 members. NOTE the ids are exact
-# Open-Meteo ensemble model ids (icon_global_eps, NOT icon_global) — a typo here
-# silently drops a whole model; test_models guards it. Sigma was calibrated on the
-# GFS+ECMWF blend; ICON only tightens the estimate, so 1.2 remains a safe floor.
-ENSEMBLE_MODELS = "gfs025,ecmwf_ifs025,icon_global_eps"
+# TRIMMED to the single 31-member GFS ensemble to stay under the free weather API's
+# DAILY cap so the bot runs all day without going dark. A 3-model blend
+# (gfs025,ecmwf_ifs025,icon_global_eps = 122 members) is sharper but ~3x the API cost
+# and exhausts the free tier — re-enable it when on a paid weather API. Ids must be
+# exact Open-Meteo ensemble ids (VALID_ENSEMBLE_MODELS guards typos like icon_global).
+ENSEMBLE_MODELS = "gfs025"
 VALID_ENSEMBLE_MODELS = {
     "gfs025", "gfs05", "aigefs025", "ecmwf_ifs025", "ecmwf_aifs025",
     "icon_seamless_eps", "icon_global_eps", "icon_eu_eps", "icon_d2_eps",
@@ -144,6 +147,18 @@ def _cache_fresh(cache, cached_sig, cached_ts, sig, now, ttl=CACHE_TTL):
 
 def _ometeo_unit(u):
     return "fahrenheit" if u == "F" else "celsius"
+
+
+def ometeo_endpoint(free_url):
+    """Given a free Open-Meteo URL, return (url, extra_params). With a paid API key
+    set, swap to the uncapped 'customer-' host and attach the key — this is what
+    lets the bot run constantly instead of dying at the free daily cap. Without a
+    key, returns the free URL unchanged."""
+    key = config.OPENMETEO_API_KEY
+    if not key:
+        return free_url, {}
+    customer = free_url.replace("https://", "https://customer-", 1)
+    return customer, {"apikey": key}
 
 
 # ---------- parsing ----------
@@ -275,10 +290,12 @@ def _fetch_weather_one(args):
         return city, None
     lat, lon, _ = loc
     try:
-        r = requests.get(FORECAST_API, params={
+        url, extra = ometeo_endpoint(FORECAST_API)
+        r = requests.get(url, params={
             "latitude": lat, "longitude": lon, "current": "temperature_2m",
             "hourly": "temperature_2m", "daily": "temperature_2m_max,temperature_2m_min",
-            "timezone": "auto", "forecast_days": 2, "temperature_unit": _ometeo_unit(unit)},
+            "timezone": "auto", "forecast_days": 2, "temperature_unit": _ometeo_unit(unit),
+            **extra},
             headers={"User-Agent": "tradingbot/0.2"}, timeout=15)
         r.raise_for_status()
         d = r.json()
@@ -332,10 +349,11 @@ def fetch_ensemble(units, is_low=False):
             return city, None
         lat, lon, _ = loc
         try:
-            r = requests.get(ENSEMBLE_API, params={
+            url, extra = ometeo_endpoint(ENSEMBLE_API)
+            r = requests.get(url, params={
                 "latitude": lat, "longitude": lon, "daily": var,
                 "models": ENSEMBLE_MODELS, "forecast_days": 5, "timezone": "auto",
-                "temperature_unit": _ometeo_unit(unit)},
+                "temperature_unit": _ometeo_unit(unit), **extra},
                 headers={"User-Agent": "tradingbot/0.2"}, timeout=25)
             if r.status_code == 429:   # hard daily cap — record it so the UI is honest
                 global _ENSEMBLE_LIMITED
@@ -641,6 +659,15 @@ def build_edge_table(avoid=()):
         lead = _lead_days(market_date, today) if (market_date and today) else None
 
         members = (ens_low if is_low else ens_high).get(city, {}).get(market_date)
+        data_source = "ensemble"
+        if not members and market_date:
+            # Open-Meteo ensemble unavailable (e.g. daily cap spent) — keep the bot
+            # alive with the free, uncapped providers (Met.no global + NWS US).
+            from strategies.providers import multi_forecast
+            loc = station_for(city)
+            if loc:
+                members = multi_forecast(loc[0], loc[1], market_date, is_low, parsed["unit"])
+                data_source = "free-fallback" if members else "ensemble"
         p_yes = bucket_probability(members, parsed) if members else None
 
         yes_p, no_p = _prices(m)
@@ -677,6 +704,7 @@ def build_edge_table(avoid=()):
             "lead_days": lead,
             "station_confirmed": bool(st and st[2]),
             "members": len(members) if members else 0,
+            "data_source": data_source,
             "model_prob": round(p_yes, 3) if p_yes is not None else None,
             "high_so_far_c": w.get("low_so_far_c") if is_low else w.get("high_so_far_c"),
             "yes_price": yes_p, "no_price": no_p,
