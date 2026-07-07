@@ -15,6 +15,7 @@ Upgrades over v1:
 Credit: algorithm descends from Leon's polybot + suislanchez ensemble idea.
 Still NOT a money printer — the goal is proving positive CLV before scaling.
 """
+import os
 import re
 import json
 import time
@@ -27,6 +28,11 @@ import requests
 GAMMA = "https://gamma-api.polymarket.com"
 FORECAST_API = "https://api.open-meteo.com/v1/forecast"
 ENSEMBLE_API = "https://ensemble-api.open-meteo.com/v1/ensemble"
+# ERA5 reanalysis — used to SETTLE past bets. Chosen deliberately: (a) it serves
+# any past date (the forecast API returns nothing beyond ~92 days), and (b) sigma
+# was fitted against ERA5 actuals in calibrate_sigma.py, so grading on ERA5 keeps
+# the yardstick that scores bets identical to the one the model was tuned against.
+ARCHIVE_API = "https://archive-api.open-meteo.com/v1/archive"
 
 # --- real bankroll for a £30 stake (~$38), £1 (~$1.25) bets ---
 BANKROLL_USD = 38.0
@@ -34,18 +40,36 @@ TRADE_CAP_USD = 2.0
 KELLY_FRACTION = 0.25          # quarter-Kelly
 EDGE_THRESHOLD = 0.08          # only trade if model_prob - price > this
 EDGE_SANITY_CAP = 0.35         # edges above this = stale/illiquid price, not a real edge
-VOLUME_FLOOR = 250             # need a real two-sided book to actually fill
+VOLUME_FLOOR = 1000            # drop thin, stale-priced markets. Polymarket temp
+                               # markets top out ~$10k (the $10k floor the pros use is
+                               # Kalshi-scale); measured, temp markets split cleanly into
+                               # a liquid cluster >=$5k and thin junk <$1k, so $1k keeps
+                               # the real books and cuts the stale-price artifacts.
+TAIL_MAX_PRICE = 0.15          # a "cheap tail": the winning weather traders concentrate
+                               # here (side priced <=~$0.15) — low hit-rate, big payouts,
+                               # +EV at volume. We tag/prioritise these.
 MAKER_FEE = 0.0                # resting limit orders are fee-free on Polymarket
 TAKER_FEE_RATE = 0.02          # market orders cost ~feeRate * min(p,1-p); we avoid these
 MIN_SHARES = 5                 # Polymarket minimum order size
 MAX_LEAD_DAYS = 3              # forecasts past ~3 days are too noisy to trust
 MAX_EXPOSURE = 0.6             # never risk more than 60% of bankroll at once
-ENSEMBLE_MODELS = "gfs025,ecmwf_ifs025"  # blend GFS (31) + ECMWF (51) = 82 members
-MEMBER_SIGMA = 0.6          # per-member forecast uncertainty (°). TUNED from a 90-day
-                            # historical backtest (backtest_weather.py): 0.6 minimises the
-                            # Brier score — the forecasts are far more accurate than the
-                            # 1.5 we first guessed. Widens each member into a smooth curve
-                            # so a threshold far off is ~0% and one on-target is well-calibrated.
+# 3-model blend GFS(31)+ECMWF(51)+ICON(40) = 122 members. NOTE the ids are exact
+# Open-Meteo ensemble model ids (icon_global_eps, NOT icon_global) — a typo here
+# silently drops a whole model; test_models guards it. Sigma was calibrated on the
+# GFS+ECMWF blend; ICON only tightens the estimate, so 1.2 remains a safe floor.
+ENSEMBLE_MODELS = "gfs025,ecmwf_ifs025,icon_global_eps"
+VALID_ENSEMBLE_MODELS = {
+    "gfs025", "gfs05", "aigefs025", "ecmwf_ifs025", "ecmwf_aifs025",
+    "icon_seamless_eps", "icon_global_eps", "icon_eu_eps", "icon_d2_eps",
+    "gem_global", "bom_access_global",
+}
+MEMBER_SIGMA = 1.2          # per-member forecast uncertainty (°). FITTED, not guessed:
+                            # strategies/calibrate_sigma.py backtests 610 station-days of
+                            # archived forecast vs ERA5 actuals at the real settlement
+                            # stations — day-ahead high RMSE is 1.44C, and sigma=1.2
+                            # minimises the Brier score (0.087). The old 0.6 was <half the
+                            # true error, which made the model overconfident and invented
+                            # fake NO edges. 1.2 is a floor; nudge up for extra safety.
 
 PATTERN = re.compile(
     r"(?P<kind>highest|lowest) temperature in (?P<city>[\w\s]+?) be (?P<threshold>\d+)\s*°?(?P<unit>[CF])"
@@ -84,8 +108,38 @@ RESOLUTION_STATION = {
     "New York City": (40.78, -73.97),   # Central Park (KNYC) — NWS CLI source
 }
 
-_wx_cache, _wx_ts = {}, 0.0
-_ens_cache, _ens_ts = {}, {}   # per-key timestamps (high/low fetched separately)
+CACHE_TTL = 3600               # 1h — the free weather API has a hard DAILY call cap,
+                               # so cache aggressively; forecasts barely move in an hour.
+_wx_cache, _wx_ts, _wx_sig = {}, 0.0, None
+_ens_cache, _ens_ts, _ens_sig = {}, {}, {}  # per-key (high/low fetched separately)
+
+# Whether the last ensemble fetch hit the weather API's hard daily cap. Lets the
+# dashboard say "data unavailable — resets tomorrow" instead of the lie "no edge
+# found" when the truth is the model couldn't fetch a single forecast.
+_ENSEMBLE_LIMITED = False
+
+
+def reset_data_status():
+    global _ENSEMBLE_LIMITED
+    _ENSEMBLE_LIMITED = False
+
+
+def ensemble_rate_limited():
+    return _ENSEMBLE_LIMITED
+
+
+def _cache_sig(units):
+    """A signature of exactly what a fetch would cover: each city, its unit, and
+    the coords/station it currently resolves to. If any of these change, the old
+    cache no longer covers the request and must be refetched — TTL alone isn't
+    enough (a new day's markets add cities the stale blob is missing)."""
+    return tuple(sorted((c, u, station_for(c)) for c, u in units.items()))
+
+
+def _cache_fresh(cache, cached_sig, cached_ts, sig, now, ttl=CACHE_TTL):
+    """Fresh only if we actually have data, it covers the SAME request, and it
+    hasn't aged out."""
+    return bool(cache) and cached_sig == sig and (now - cached_ts) < ttl
 
 
 def _ometeo_unit(u):
@@ -106,6 +160,43 @@ def parse_date(date_str, fallback_year):
         return None
 
 
+# --- latency arbitrage: bet right when fresh model data lands, before the market
+# reprices. GFS/ECMWF ensembles run at 00/06/12/18 UTC and Open-Meteo publishes the
+# processed data ~5h later, so fresh forecasts appear ~05/11/17/23 UTC. Scanning just
+# after these beats scanning on a dumb fixed timer into stale prices. ---
+MODEL_RELEASE_UTC_HOURS = (5, 11, 17, 23)
+
+
+def seconds_until_next_release(now):
+    """Seconds from `now` (a naive UTC datetime) to the next model-release window."""
+    cur = now.hour * 3600 + now.minute * 60 + now.second
+    releases = sorted(h * 3600 for h in MODEL_RELEASE_UTC_HOURS)
+    for r in releases:
+        if r > cur:
+            return r - cur
+    return releases[0] + 86400 - cur   # wrap to the first window tomorrow
+
+
+def resolve_market_date(date_str, today_iso):
+    """Turn a 'Month Day' string into an ISO date, choosing the calendar year
+    (this / next / previous) that lands nearest `today`. Without this, a market
+    dated 'January 2' seen on Dec 30 resolves to this-year-January — ~360 days in
+    the past — and gets wrongly dropped as stale right when it's most tradeable."""
+    if not today_iso:
+        return None
+    y = int(today_iso[:4])
+    ref = date.fromisoformat(today_iso)
+    best = None
+    for yr in (y, y + 1, y - 1):
+        d = parse_date(date_str, yr)
+        if not d:
+            continue
+        delta = (date.fromisoformat(d) - ref).days
+        if best is None or abs(delta) < abs(best[1]):
+            best = (d, delta)
+    return best[0] if best else None
+
+
 def parse_question(q):
     m = PATTERN.search(q.strip())
     if not m:
@@ -120,8 +211,53 @@ def parse_question(q):
             "date_str": m.group("date").strip()}
 
 
+# ---- settlement-station resolution straight from each market's description ----
+# Every temp market's description names the exact airport it settles on and links
+# its Wunderground page, whose URL ends in the station's 4-letter ICAO code
+# (e.g. .../history/daily/cn/chongqing/ZUCK). We resolve that ICAO to real coords
+# via a cached OurAirports table, so the forecast is pulled for the SAME station
+# the market pays on — not a city-centre guess that can be 1-3° off.
+_ICAO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "brokers", "_airports_icao.json")
+_ICAO_COORDS = None
+_RUN_STATION = {}   # city -> (lat, lon, station_name); rebuilt each scan
+
+
+def _icao_table():
+    global _ICAO_COORDS
+    if _ICAO_COORDS is None:
+        try:
+            with open(_ICAO_PATH) as f:
+                _ICAO_COORDS = json.load(f)
+        except Exception:
+            _ICAO_COORDS = {}
+    return _ICAO_COORDS
+
+
+# ICAO is the last URL segment; require 4 UPPERCASE letters so the city slug
+# (e.g. "new-york-city") can't be mistaken for a station code.
+_ICAO_RE = re.compile(r"wunderground\.com/history/daily/[a-z]{2}/[a-z0-9-]+/([A-Z]{4})\b")
+_STATION_RE = re.compile(r"recorded at the (.+?) Station", re.I)
+
+
+def station_from_description(desc):
+    """(lat, lon, name) of the market's real settlement station, or None."""
+    if not desc:
+        return None
+    m = _ICAO_RE.search(desc)
+    nm = _STATION_RE.search(desc)
+    if m:
+        coords = _icao_table().get(m.group(1))
+        if coords:
+            return (coords[0], coords[1], (nm.group(1) if nm else m.group(1)))
+    return None
+
+
 def station_for(city):
     """Return (lat, lon, confirmed) — resolution station if known, else city centre."""
+    if city in _RUN_STATION:                       # resolved from the market itself
+        lat, lon, _name = _RUN_STATION[city]
+        return (lat, lon, True)
     if city in RESOLUTION_STATION:
         return (*RESOLUTION_STATION[city], True)
     if city in CITY_COORDS:
@@ -142,7 +278,7 @@ def _fetch_weather_one(args):
         r = requests.get(FORECAST_API, params={
             "latitude": lat, "longitude": lon, "current": "temperature_2m",
             "hourly": "temperature_2m", "daily": "temperature_2m_max,temperature_2m_min",
-            "timezone": "auto", "forecast_days": 16, "temperature_unit": _ometeo_unit(unit)},
+            "timezone": "auto", "forecast_days": 2, "temperature_unit": _ometeo_unit(unit)},
             headers={"User-Agent": "tradingbot/0.2"}, timeout=15)
         r.raise_for_status()
         d = r.json()
@@ -164,15 +300,16 @@ def _fetch_weather_one(args):
 
 
 def fetch_weather(units):
-    global _wx_cache, _wx_ts
-    if _wx_cache and time.time() - _wx_ts < 1800:
+    global _wx_cache, _wx_ts, _wx_sig
+    sig = _cache_sig(units)
+    if _cache_fresh(_wx_cache, _wx_sig, _wx_ts, sig, time.time()):
         return _wx_cache
     out = {}
     with ThreadPoolExecutor(max_workers=12) as ex:
         for city, data in ex.map(_fetch_weather_one, list(units.items())):
             if data:
                 out[city] = data
-    _wx_cache, _wx_ts = out, time.time()
+    _wx_cache, _wx_ts, _wx_sig = out, time.time(), sig
     return out
 
 
@@ -180,10 +317,11 @@ def fetch_weather(units):
 def fetch_ensemble(units, is_low=False):
     """Return {city: {date: [member temps]}} from the 82-member GFS+ECMWF blend,
     fetched in each city's native unit."""
-    global _ens_cache, _ens_ts
+    global _ens_cache, _ens_ts, _ens_sig
     key = "low" if is_low else "high"
+    sig = _cache_sig(units)
     cache = _ens_cache.get(key)
-    if cache and time.time() - _ens_ts.get(key, 0) < 1800:
+    if _cache_fresh(cache, _ens_sig.get(key), _ens_ts.get(key, 0), sig, time.time()):
         return cache
     var = "temperature_2m_min" if is_low else "temperature_2m_max"
 
@@ -196,9 +334,13 @@ def fetch_ensemble(units, is_low=False):
         try:
             r = requests.get(ENSEMBLE_API, params={
                 "latitude": lat, "longitude": lon, "daily": var,
-                "models": ENSEMBLE_MODELS, "forecast_days": 7, "timezone": "auto",
+                "models": ENSEMBLE_MODELS, "forecast_days": 5, "timezone": "auto",
                 "temperature_unit": _ometeo_unit(unit)},
                 headers={"User-Agent": "tradingbot/0.2"}, timeout=25)
+            if r.status_code == 429:   # hard daily cap — record it so the UI is honest
+                global _ENSEMBLE_LIMITED
+                _ENSEMBLE_LIMITED = True
+                return city, None
             r.raise_for_status()
             d = r.json().get("daily", {})
             dates = d.get("time", [])
@@ -219,17 +361,33 @@ def fetch_ensemble(units, is_low=False):
                 out[city] = data
     _ens_cache[key] = out
     _ens_ts[key] = time.time()
+    _ens_sig[key] = sig
     return out
 
 
-def bucket_hits(members, parsed):
-    """How many ensemble members land in the YES outcome."""
+def resolves_yes(parsed, temp):
+    """THE canonical settlement rule — the single source of truth for whether an
+    observed temperature `temp` settles a market YES. Both the model (P(win)) and
+    the ledger (did-we-win) MUST route through this, or calibration measures noise.
+
+    Wunderground reports the daily high/low as a ROUNDED integer and the market
+    resolves to the range containing it, so YES iff round(temp) satisfies the
+    condition (half-open intervals match round-half-up):
+      "be T"           -> round(temp) == T  <=>  T-0.5 <= temp <  T+0.5
+      "be T or higher" -> round(temp) >= T  <=>       temp >= T-0.5
+      "be T or below"  -> round(temp) <= T  <=>       temp <  T+0.5
+    """
     T = parsed["threshold_c"]
     if parsed["or_higher"]:
-        return sum(1 for m in members if m >= T)
+        return temp >= T - 0.5
     if parsed["or_below"]:
-        return sum(1 for m in members if m <= T + 0.99)
-    return sum(1 for m in members if T <= m < T + 1)  # exact 1-degree bucket
+        return temp < T + 0.5
+    return T - 0.5 <= temp < T + 0.5
+
+
+def bucket_hits(members, parsed):
+    """How many ensemble members land in the YES outcome (same rule as settlement)."""
+    return sum(1 for m in members if resolves_yes(parsed, m))
 
 
 def _cdf(z):
@@ -255,12 +413,15 @@ def bucket_probability(members, parsed):
     T = parsed["threshold_c"]
     s = MEMBER_SIGMA
 
+    # Wunderground rounds to an integer, market resolves to the range CONTAINING
+    # it: the T° outcome = true temp in [T-0.5, T+0.5). Bucket edges are centred
+    # on T, not offset by a full degree as before.
     def p_member(mv):
-        if parsed["or_higher"]:          # true temp >= T
-            return 1 - _cdf((T - mv) / s)
-        if parsed["or_below"]:           # true temp <= T + 0.99
-            return _cdf((T + 0.99 - mv) / s)
-        return _cdf((T + 1 - mv) / s) - _cdf((T - mv) / s)  # exact bucket [T, T+1)
+        if parsed["or_higher"]:          # rounds to >= T  <=> true temp >= T-0.5
+            return 1 - _cdf((T - 0.5 - mv) / s)
+        if parsed["or_below"]:           # rounds to <= T  <=> true temp < T+0.5
+            return _cdf((T + 0.5 - mv) / s)
+        return _cdf((T + 0.5 - mv) / s) - _cdf((T - 0.5 - mv) / s)  # rounds-to-T
 
     p = sum(p_member(mv) for mv in members) / len(members)
     return min(0.97, max(0.005, p))
@@ -335,6 +496,59 @@ def maker_fits(side_price, bet_usd):
     return shares >= MIN_SHARES
 
 
+# ---------- self-learning: features shared by the ledger and the selector ----------
+def bet_features(feat):
+    """Stable category tags describing a bet. The SAME tags are computed for a
+    resolved bet (so the ledger can see which categories actually lose) and for a
+    live candidate (so selection can refuse categories the record has proven bad).
+    One tag from each axis. feat keys: station_confirmed(bool), is_exact(bool),
+    lead_days(int|None), side('YES'/'NO'), edge(float)."""
+    ld = feat.get("lead_days")
+    edge = feat.get("edge") or 0
+    sp = feat.get("side_price")
+    tags = {
+        "confirmed_station" if feat.get("station_confirmed") else "unconfirmed_station",
+        "exact_bucket" if feat.get("is_exact") else "open_ended",
+        "lead_0_1" if (ld is not None and ld <= 1) else "lead_2plus",
+        "side_" + (feat.get("side") or "?"),
+        "small_edge" if edge <= 0.12 else "big_edge",
+    }
+    if sp is not None:   # cheap-tail axis only when we know the price paid
+        tags.add("cheap_tail" if 0 < sp <= TAIL_MAX_PRICE else "not_tail")
+    return tags
+
+
+def is_actionable(c, avoid=()):
+    """The single, pure selection rule (also unit-tested): should we actually rest
+    a maker bet on candidate `c`? Keeps the criteria in one place instead of a
+    ten-line boolean buried in build_edge_table. `c` carries edge, model_prob,
+    liquid, volume, lead, side_price, maker_fits + the bet_features inputs."""
+    edge, sp, lead = c.get("edge"), c.get("side_price"), c.get("lead")
+    if not (edge and EDGE_THRESHOLD < edge <= EDGE_SANITY_CAP):
+        return False
+    if c.get("model_prob") is None:
+        return False
+    if not c.get("liquid") or (c.get("volume") or 0) < VOLUME_FLOOR:
+        return False
+    if lead is None or not (0 <= lead <= MAX_LEAD_DAYS):
+        return False
+    if not sp or not (sp <= 0.40 or sp >= 0.60):   # skip the fee/liquidity dead-zone
+        return False
+    if not c.get("maker_fits"):
+        return False
+    feat = {"station_confirmed": c.get("station_confirmed"), "is_exact": c.get("is_exact"),
+            "lead_days": lead, "side": c.get("side"), "edge": edge, "side_price": sp}
+    if bet_features(feat) & set(avoid or ()):      # a learned-loser category
+        return False
+    return True
+
+
+def passes_lessons(feat, avoid):
+    """False iff this bet falls in a category the resolved record has proven to
+    lose (a learned 'avoid' tag). Empty avoid set => everything passes."""
+    return not (bet_features(feat) & set(avoid or ()))
+
+
 # ---------- polymarket markets ----------
 def _prices(market):
     outcomes, prices = market.get("outcomes"), market.get("outcomePrices")
@@ -344,6 +558,17 @@ def _prices(market):
         return None, None
     d = {o.lower(): float(p) for o, p in zip(outcomes, prices)}
     return d.get("yes"), d.get("no")
+
+
+def _token_ids(market):
+    """{outcome.lower(): clob_token_id} — the on-chain order token per outcome.
+    Empty if the market doesn't expose an order book we could rest into."""
+    ids, outs = market.get("clobTokenIds"), market.get("outcomes")
+    if isinstance(ids, str): ids = json.loads(ids)
+    if isinstance(outs, str): outs = json.loads(outs)
+    if not ids or not outs:
+        return {}
+    return {o.lower(): t for o, t in zip(outs, ids)}
 
 
 def fetch_temp_markets(max_pages=6, page=200):
@@ -370,11 +595,27 @@ def _lead_days(market_date, today):
         return None
 
 
-def build_edge_table():
-    """Ranked live weather-edge opportunities, ensemble-driven, maker-fit filtered."""
+def build_edge_table(avoid=()):
+    """Ranked live weather-edge opportunities, ensemble-driven, maker-fit filtered.
+
+    `avoid` is the set of learned-bad category tags from ledger.lessons(): any
+    candidate falling in one is demoted out of 'actionable' so the bot stops
+    repeating a category its own track record has proven to lose."""
+    reset_data_status()   # clears the rate-limit flag; fetch_ensemble re-sets it if hit
     markets = fetch_temp_markets()
     parsed_all = [(m, parse_question(m["question"])) for m in markets]
-    parsed_all = [(m, p) for m, p in parsed_all if p and p["city"] in CITY_COORDS]
+    parsed_all = [(m, p) for m, p in parsed_all if p]
+    # resolve each market's ACTUAL settlement station from its own description,
+    # so forecast + ensemble are pulled for that airport (not the city centre).
+    global _RUN_STATION
+    _RUN_STATION = {}
+    for m, p in parsed_all:
+        st = station_from_description(m.get("description"))
+        if st:
+            _RUN_STATION[p["city"]] = st
+    # keep any market we can actually locate: resolved station OR known city centre
+    parsed_all = [(m, p) for m, p in parsed_all
+                  if p["city"] in _RUN_STATION or p["city"] in CITY_COORDS]
     # each city's unit = whatever its markets are quoted in (US=F, else C).
     # If a city somehow has both, prefer F (US markets); consistent per-city in practice.
     units = {}
@@ -393,8 +634,8 @@ def build_edge_table():
         is_low = parsed["kind"] == "lowest"
         w = wx.get(city, {})
         today = (w.get("local_time", "") or "").split("T")[0] or None
-        fallback_year = int(today.split("-")[0]) if today else datetime.utcnow().year
-        market_date = parse_date(parsed["date_str"], fallback_year)
+        market_date = (resolve_market_date(parsed["date_str"], today) if today
+                       else parse_date(parsed["date_str"], datetime.utcnow().year))
         if market_date and today and market_date < today:
             continue  # stale
         lead = _lead_days(market_date, today) if (market_date and today) else None
@@ -410,20 +651,23 @@ def build_edge_table():
 
         liquid = bool(yes_p and no_p and 0.05 <= yes_p <= 0.95 and 0.05 <= no_p <= 0.95)
         vol = float(m.get("volume") or 0)
-        # tight selection: REAL edge (not stale-price artifact), liquid book,
-        # out of the dead-zone, maker-fittable, near-term.
-        actionable = bool(
-            pe["edge"] and EDGE_THRESHOLD < pe["edge"] <= EDGE_SANITY_CAP
-            and p_yes is not None
-            and liquid and vol >= VOLUME_FLOOR
-            and lead is not None and 0 <= lead <= MAX_LEAD_DAYS
-            and side_price and (side_price <= 0.40 or side_price >= 0.60)  # skip dead-zone
-            and fits
-        )
+        st = station_for(city)
+        is_exact = not parsed["or_higher"] and not parsed["or_below"]
+        cheap_tail = bool(side_price and 0 < side_price <= TAIL_MAX_PRICE)
+        feat = {"station_confirmed": bool(st and st[2]), "is_exact": is_exact,
+                "lead_days": lead, "side": pe["best_side"], "edge": pe["edge"],
+                "side_price": side_price}
+        # a category the track record has proven to lose (see ledger.lessons):
+        # keep the row but never mark it actionable.
+        blocked_by = sorted(bet_features(feat) & set(avoid or ()))
+        candidate = {"edge": pe["edge"], "model_prob": p_yes, "liquid": liquid,
+                     "volume": vol, "lead": lead, "side_price": side_price,
+                     "maker_fits": fits, **feat}
+        actionable = is_actionable(candidate, avoid)
 
         ev = m.get("events")
         slug = (ev[0].get("slug") if isinstance(ev, list) and ev else None) or m.get("slug")
-        st = station_for(city)
+        token_id = _token_ids(m).get(pe["best_side"].lower()) if pe["best_side"] else None
         reason = (build_reasoning(parsed, members, p_yes, pe, lead, bool(st and st[2]))
                   if (p_yes is not None and pe["best_side"]) else
                   {"reasoning": "Not enough forecast data to form a view.", "confidence": "—", "conf_model_pct": None})
@@ -440,11 +684,15 @@ def build_edge_table():
             "bet_usd": bet, "maker_fits": fits,
             "actionable": actionable,
             "liquid": liquid,
+            "cheap_tail": cheap_tail,  # side priced <= TAIL_MAX_PRICE — the pros' zone
+            "token_id": token_id,      # CLOB order token for the chosen side
+            "blocked_by": blocked_by,  # learned-loser tags that vetoed this bet, if any
             "poly_url": f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com",
             **pe, **reason,
         })
-    # actionable first, then by edge
-    rows.sort(key=lambda r: (not r["actionable"], -(r.get("edge") or -999)))
+    # actionable first, then cheap tails (where the documented edge lives), then edge
+    rows.sort(key=lambda r: (not r["actionable"], not r.get("cheap_tail"),
+                             -(r.get("edge") or -999)))
     return rows
 
 

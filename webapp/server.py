@@ -327,9 +327,14 @@ def _api_weather_edge():
     """Live ensemble weather-edge opportunities, ranked, with paper-CLV logging."""
     try:
         from strategies.weather_edge import build_edge_table
-        from strategies import ledger
+        from strategies import ledger, executor
         from datetime import datetime
-        rows = build_edge_table()
+        # feed the bot's own learned lessons back into selection: any category its
+        # resolved record has proven to lose is refused before we ever act on it.
+        avoid = ledger.lessons().get("avoid", [])
+        rows = build_edge_table(avoid=avoid)
+        from strategies.weather_edge import ensemble_rate_limited
+        data_status = "rate_limited" if ensemble_rate_limited() else "ok"
         actionable = [r for r in rows if r.get("actionable")]
         # the best bets to SHOW: liquid, real model view, meaningful edge — ranked
         candidates = [r for r in rows
@@ -337,19 +342,26 @@ def _api_weather_edge():
                       and (r.get("edge") or 0) > 0.03]
         candidates.sort(key=lambda r: -(r.get("edge") or 0))
         now = datetime.now()
+        orders = {}
         try:
             ledger.log_scan(actionable, now.isoformat(timespec="seconds"))
             ledger.resolve_pending(now.strftime("%Y-%m-%d"))  # self-learning: settle past bets
+            # the bot places its OWN bets — hard-gated: real orders only when armed,
+            # otherwise logs the intended maker order and places nothing.
+            orders = executor.place_actionable(actionable, now.isoformat(timespec="seconds"))
         except Exception:
             pass
         return {"picks": candidates[:12],
+                "orders": orders,
+                "data_status": data_status,  # "rate_limited" => forecast API daily cap hit
                 "upcoming": candidates[:60],  # all upcoming, for the calendar
                 "counts": {"actionable": len(actionable),
                            "candidates": len(candidates),
                            "liquid": sum(1 for r in rows if r.get("liquid")),
                            "total": len(rows)},
                 "ledger": ledger.stats(),
-                "calibration": ledger.calibration()}
+                "calibration": ledger.calibration(),
+                "lessons": ledger.lessons()}
     except Exception as e:
         return {"error": str(e)[:150], "picks": [], "upcoming": [], "counts": {}, "ledger": {}}
 

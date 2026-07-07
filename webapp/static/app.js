@@ -362,12 +362,16 @@ async function loadPredictions() {
     <div class="lstat"><div class="k">Calibration</div><div class="v">${cal.brier != null ? cal.brier : "—"}</div></div>
     <div class="lnote">${learnNote}</div>`;
   const picks = d.picks || [];
+  const rateLimited = d.data_status === "rate_limited";
+  const emptyMsg = rateLimited
+    ? `<div class="muted">⚠️ Weather forecast data is temporarily unavailable — the free weather API's daily request limit was hit. It resets tomorrow; the model can't score markets until then. (Not a "no edge" result — no data.)</div>`
+    : `<div class="muted">No edges this scan — the model found no liquid market it disagrees with. Markets and forecasts move hourly; check back.</div>`;
   $("#top-cards").innerHTML = picks.length
     ? picks.slice(0, 4).map((r, i) => topCard(r, i)).join("")
-    : `<div class="muted">No edges this scan — the model found no liquid market it disagrees with. Markets and forecasts move hourly; check back.</div>`;
+    : emptyMsg;
   renderCalendar(d.upcoming || []);
   $("#pick-cards").innerHTML = picks.map(pickCard).join("")
-    || `<div class="muted">Nothing to break down right now.</div>`;
+    || (rateLimited ? emptyMsg : `<div class="muted">Nothing to break down right now.</div>`);
   $$(".calcin").forEach(calcBet);  // show default £1 calc on every card
 }
 
