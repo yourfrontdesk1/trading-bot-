@@ -236,6 +236,7 @@ _ICAO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "..", "brokers", "_airports_icao.json")
 _ICAO_COORDS = None
 _RUN_STATION = {}   # city -> (lat, lon, station_name); rebuilt each scan
+_RUN_ICAO = {}      # city -> settlement-station ICAO; rebuilt each scan
 
 
 def _icao_table():
@@ -266,6 +267,15 @@ def station_from_description(desc):
         if coords:
             return (coords[0], coords[1], (nm.group(1) if nm else m.group(1)))
     return None
+
+
+def icao_from_description(desc):
+    """The 4-letter ICAO of the market's settlement station, or None — used to pull
+    the actual METAR observation the market settles on."""
+    if not desc:
+        return None
+    m = _ICAO_RE.search(desc)
+    return m.group(1) if m else None
 
 
 def station_for(city):
@@ -625,12 +635,15 @@ def build_edge_table(avoid=()):
     parsed_all = [(m, p) for m, p in parsed_all if p]
     # resolve each market's ACTUAL settlement station from its own description,
     # so forecast + ensemble are pulled for that airport (not the city centre).
-    global _RUN_STATION
-    _RUN_STATION = {}
+    global _RUN_STATION, _RUN_ICAO
+    _RUN_STATION, _RUN_ICAO = {}, {}
     for m, p in parsed_all:
         st = station_from_description(m.get("description"))
         if st:
             _RUN_STATION[p["city"]] = st
+        ic = icao_from_description(m.get("description"))
+        if ic:
+            _RUN_ICAO[p["city"]] = ic
     # keep any market we can actually locate: resolved station OR known city centre
     parsed_all = [(m, p) for m, p in parsed_all
                   if p["city"] in _RUN_STATION or p["city"] in CITY_COORDS]
@@ -703,6 +716,7 @@ def build_edge_table(avoid=()):
             "kind": parsed["kind"], "date_str": parsed["date_str"], "market_date": market_date,
             "lead_days": lead,
             "station_confirmed": bool(st and st[2]),
+            "station_icao": _RUN_ICAO.get(city),   # for settling on the real METAR obs
             "members": len(members) if members else 0,
             "data_source": data_source,
             "model_prob": round(p_yes, 3) if p_yes is not None else None,

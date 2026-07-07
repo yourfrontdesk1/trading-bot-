@@ -10,9 +10,12 @@ None of these need an API key or an account.
 These are used as a resilient FALLBACK when the Open-Meteo ensemble is unavailable
 (e.g. its free daily cap is spent), so the bot keeps producing forecasts 24/7.
 """
+from datetime import datetime, timezone
+
 import requests
 
 UA = {"User-Agent": "trading-bot/0.3 (leonthick717@gmail.com)"}
+AVIATIONWEATHER = "https://aviationweather.gov/api/data/metar"
 
 
 def _c2f(c):
@@ -66,6 +69,41 @@ def nws_daily(lat, lon, date_iso, is_low, unit):
         is_c = cand[0].get("temperatureUnit") == "C"
         c = t if is_c else _f2c(t)
         return (_c2f(c) if unit == "F" else c)
+    except Exception:
+        return None
+
+
+def _daily_from_metar(obs, date_iso, is_low, unit):
+    """Pure: the observed daily high/low for date_iso from a list of METAR obs
+    dicts (each {temp: °C, obsTime: unix}). Bucketed by UTC date."""
+    vals = []
+    for o in obs:
+        t, ot = o.get("temp"), o.get("obsTime")
+        if t is None or ot is None:
+            continue
+        if datetime.fromtimestamp(ot, tz=timezone.utc).strftime("%Y-%m-%d") == date_iso:
+            vals.append(t)
+    if not vals:
+        return None
+    c = min(vals) if is_low else max(vals)
+    return _c2f(c) if unit == "F" else c
+
+
+def metar_daily(icao, date_iso, is_low, unit="C", hours=72):
+    """The ACTUAL settlement observation: daily high/low at a station's METAR — the
+    same source Wunderground derives its number from. Free, global, no key. Covers
+    ~the last 3 days (enough to settle a bet within a day of resolution). Returns
+    the value in the market's `unit`, or None.
+
+    US caveat: METAR temp is whole °C; for °F markets we convert (±~0.9°F), which
+    can rarely flip a 1°F bucket — so the ledger falls back to ERA5 if this is None."""
+    if not icao:
+        return None
+    try:
+        r = requests.get(AVIATIONWEATHER, params={"ids": icao, "format": "json", "hours": hours},
+                         headers=UA, timeout=20)
+        r.raise_for_status()
+        return _daily_from_metar(r.json(), date_iso, is_low, unit)
     except Exception:
         return None
 

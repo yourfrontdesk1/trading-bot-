@@ -46,6 +46,7 @@ def log_scan(actionable_rows, ts):
                 "model_prob": r.get("model_prob"), "edge": r.get("edge"),
                 "bet_usd": r.get("bet_usd"), "lead_days": r.get("lead_days"),
                 "station_confirmed": r.get("station_confirmed"),
+                "station_icao": r.get("station_icao"),
                 "resolved": None, "won": None, "close_price": None,
             }) + "\n")
             seen.add(k)
@@ -109,8 +110,21 @@ def resolve_pending(today_iso):
             continue
         lat, lon, _ = loc
         is_low = parsed["kind"] == "lowest"
-        var = "temperature_2m_min" if is_low else "temperature_2m_max"
-        actual = fetch_actual_temp(lat, lon, var, parsed.get("unit", "C"), r["market_date"])
+        unit = parsed.get("unit", "C")
+        # Settle on the ACTUAL station observation (METAR) the market pays out on —
+        # the same source Wunderground uses. Fall back to ERA5 only if unavailable
+        # (older than METAR's ~3-day window, or no ICAO on the bet).
+        actual, settle_source = None, None
+        icao = r.get("station_icao")
+        if icao:
+            from strategies.providers import metar_daily
+            actual = metar_daily(icao, r["market_date"], is_low, unit)
+            if actual is not None:
+                settle_source = "metar"
+        if actual is None:
+            var = "temperature_2m_min" if is_low else "temperature_2m_max"
+            actual = fetch_actual_temp(lat, lon, var, unit, r["market_date"])
+            settle_source = "era5"
         if actual is None:
             continue
         # settle through the SAME canonical rule the model priced against, so the
@@ -118,6 +132,7 @@ def resolve_pending(today_iso):
         outcome_side = "YES" if resolves_yes(parsed, actual) else "NO"
         r["resolved"] = True
         r["actual_temp"] = round(actual, 1)
+        r["settle_source"] = settle_source
         r["won"] = (r.get("side") == outcome_side)
         resolved += 1
     if resolved:
