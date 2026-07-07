@@ -5,3 +5,4 @@ __pycache__/
 *.log
 state.json
 state/
+venv313/
