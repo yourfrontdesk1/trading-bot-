@@ -334,7 +334,12 @@ def _api_weather_edge():
         avoid = ledger.lessons().get("avoid", [])
         rows = build_edge_table(avoid=avoid)
         from strategies.weather_edge import ensemble_rate_limited
-        data_status = "rate_limited" if ensemble_rate_limited() else "ok"
+        used_fallback = any(r.get("data_source") == "free-fallback"
+                            and r.get("model_prob") is not None for r in rows)
+        # "fallback" = Open-Meteo capped but the free providers kept us alive (coarser);
+        # "rate_limited" = capped AND no data at all; "ok" = full ensemble.
+        data_status = ("fallback" if used_fallback else
+                       "rate_limited" if ensemble_rate_limited() else "ok")
         actionable = [r for r in rows if r.get("actionable")]
         # the best bets to SHOW: liquid, real model view, meaningful edge — ranked
         candidates = [r for r in rows

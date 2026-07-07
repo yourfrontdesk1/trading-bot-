@@ -363,12 +363,16 @@ async function loadPredictions() {
     <div class="lnote">${learnNote}</div>`;
   const picks = d.picks || [];
   const rateLimited = d.data_status === "rate_limited";
+  const onFallback = d.data_status === "fallback";
   const emptyMsg = rateLimited
     ? `<div class="muted">⚠️ Weather forecast data is temporarily unavailable — the free weather API's daily request limit was hit. It resets tomorrow; the model can't score markets until then. (Not a "no edge" result — no data.)</div>`
     : `<div class="muted">No edges this scan — the model found no liquid market it disagrees with. Markets and forecasts move hourly; check back.</div>`;
-  $("#top-cards").innerHTML = picks.length
+  const fallbackBanner = onFallback
+    ? `<div class="muted">⚙️ Running on backup weather sources (Met.no / NWS) — Open-Meteo is capped. Forecasts are single-source and coarser, so treat these as lower-confidence until it resets.</div>`
+    : "";
+  $("#top-cards").innerHTML = fallbackBanner + (picks.length
     ? picks.slice(0, 4).map((r, i) => topCard(r, i)).join("")
-    : emptyMsg;
+    : emptyMsg);
   renderCalendar(d.upcoming || []);
   $("#pick-cards").innerHTML = picks.map(pickCard).join("")
     || (rateLimited ? emptyMsg : `<div class="muted">Nothing to break down right now.</div>`);
