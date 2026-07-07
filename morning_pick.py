@@ -40,25 +40,25 @@ def main():
         return
 
     picks = d.get("picks", [])
+    # ONLY promote genuinely actionable bets. Watch-only candidates (esp. big edges
+    # from single-source fallback) are artifacts, not recommendations.
     actionable = [p for p in picks if p.get("actionable")]
-    pool = actionable or picks
     status = d.get("data_status")
     led = d.get("ledger", {})
     week = f"week: {led.get('resolved', 0)} resolved, win {led.get('win_rate')}%"
 
-    if not pool:
-        line = f"{ts} | NO BET today (no clear edge / {status}). {week}"
+    if not actionable:
+        line = f"{ts} | NO BET today — nothing cleared the bar ({status}). {week}"
         _log(line); print(line); _notify("Weather bot — no bet today", week)
         return
 
-    b = pool[0]
-    tag = "ACTIONABLE" if b.get("actionable") else "watch-only"
+    b = actionable[0]
     headline = f"{b.get('best_side')} {b.get('city')} {b.get('threshold_c')}° @ {b.get('p_market')}"
     line = (f"{ts} | TODAY'S £1 BET: {headline} | model {b.get('model_prob')} "
-            f"edge {b.get('edge')} ({tag}, src {b.get('data_source')}, {status}) "
+            f"edge {b.get('edge')} (src {b.get('data_source')}, {status}) "
             f"| {b.get('poly_url')} | {week}")
     _log(line); print(line)
-    _notify(f"Weather bot — {tag}", f"{headline}  (edge {b.get('edge')})")
+    _notify("Weather bot — place £1", f"{headline}  (edge {b.get('edge')})")
 
 
 if __name__ == "__main__":
