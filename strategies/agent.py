@@ -5,17 +5,16 @@ This is the one strategy with a shot at a real edge — it looks at information
 price-only strategies can't see. It is NOT a guarantee of profit; every call is
 still just a probabilistic opinion to be tested, not trusted.
 
-Uses Claude (claude-opus-4-8 by default) with the web_search server tool +
-adaptive thinking. Returns {direction, confidence, rationale, findings}.
+Runs on the **Claude Console API** (the official Anthropic SDK) with its own API
+key, so it's a standalone agent — not tied to a personal `claude` CLI login. Set
+ANTHROPIC_API_KEY in .env (from console.anthropic.com). Uses claude-opus-4-8 with
+adaptive thinking + the server-side web_search tool. Returns
+{direction, confidence, rationale, findings}.
 """
 import json
 import re
-import subprocess
 
 import config
-
-# Runs through the local `claude` CLI (your Claude Code login) — NOT the paid
-# Console API key. No per-token console charges.
 
 _SYSTEM = """You are a disciplined trading analyst. You are given one instrument
 (a stock or a prediction market) and must form a view using CURRENT, real-world
@@ -36,7 +35,7 @@ End your response with EXACTLY one JSON object on its own, no prose after it:
 
 
 def _extract_json(text):
-    # grab the last {...} block
+    # grab the last {...} block that looks like our decision
     matches = re.findall(r"\{[\s\S]*\}", text)
     for m in reversed(matches):
         try:
@@ -51,39 +50,55 @@ def _extract_json(text):
 def analyze(subject: str, kind: str = "stock", context: str = "") -> dict:
     """subject: e.g. 'NVDA' or a Polymarket question. Returns a decision dict.
 
-    Uses the local `claude` CLI (your Claude Code session) with web search —
-    no Console API key, no per-token charges.
-    """
-    label = "stock ticker" if kind == "stock" else "prediction market"
-    prompt = (
-        f"{_SYSTEM}\n\n---\nAnalyze this {label}: {subject}\n{context}\n"
-        "Search the web for current information, then give your view for a short-term trade. "
-        "Output ONLY the JSON object described above as your final message."
-    )
-    try:
-        proc = subprocess.run(
-            ["claude", "-p", prompt,
-             "--allowedTools", "WebSearch,WebFetch",
-             "--max-turns", "10"],
-            capture_output=True, text=True, timeout=240,
-        )
-    except FileNotFoundError:
-        return {"error": "claude CLI not found on PATH", "direction": "hold", "confidence": 0}
-    except subprocess.TimeoutExpired:
-        return {"error": "analysis timed out", "direction": "hold", "confidence": 0}
+    Uses the Claude Console API (paid, per-token) with server-side web search —
+    a standalone agent that runs anywhere ANTHROPIC_API_KEY is set."""
+    import anthropic
 
-    text = (proc.stdout or "").strip()
+    if not config.ANTHROPIC_API_KEY:
+        return {"error": "ANTHROPIC_API_KEY not set — add your Claude Console key to .env",
+                "direction": "hold", "confidence": 0}
+
+    label = "stock ticker" if kind == "stock" else "prediction market"
+    prompt = (f"Analyze this {label}: {subject}\n{context}\n"
+              "Search the web for current information, then give your view for a short-term trade. "
+              "Output ONLY the JSON object described in the system prompt as your final message.")
+
+    try:
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        messages = [{"role": "user", "content": prompt}]
+        resp = None
+        # server-side web search runs its own loop; resume on pause_turn (no extra
+        # user message — the API detects the trailing server_tool_use and continues).
+        for _ in range(6):
+            resp = client.messages.create(
+                model=config.AGENT_MODEL,          # claude-opus-4-8
+                max_tokens=16000,
+                system=_SYSTEM,
+                thinking={"type": "adaptive"},
+                tools=[{"type": "web_search_20260209", "name": "web_search"}],
+                messages=messages,
+            )
+            if resp.stop_reason != "pause_turn":
+                break
+            messages.append({"role": "assistant", "content": resp.content})
+        if resp is not None and resp.stop_reason == "refusal":
+            return {"error": "model declined the request", "direction": "hold", "confidence": 0}
+        text = "".join(b.text for b in resp.content if b.type == "text").strip()
+    except anthropic.APIStatusError as e:
+        return {"error": f"Claude API error {e.status_code}", "direction": "hold", "confidence": 0}
+    except Exception as e:
+        return {"error": str(e)[:200], "direction": "hold", "confidence": 0}
+
     if not text:
-        return {"error": (proc.stderr or "no output")[:200], "direction": "hold", "confidence": 0}
+        return {"error": "no output", "direction": "hold", "confidence": 0}
     parsed = _extract_json(text)
     if not parsed:
         return {"error": "no decision parsed", "raw": text[:300], "direction": "hold", "confidence": 0}
-    parsed["model"] = "claude-code (local session)"
+    parsed["model"] = f"{config.AGENT_MODEL} (Claude Console API)"
     return parsed
 
 
 if __name__ == "__main__":
     import sys
     subj = sys.argv[1] if len(sys.argv) > 1 else "NVDA"
-    out = analyze(subj, "stock", "Current price around $195.")
-    print(json.dumps(out, indent=2))
+    print(json.dumps(analyze(subj, "stock", "Current price around $195."), indent=2))
