@@ -647,6 +647,13 @@ def build_edge_table(avoid=()):
     # keep any market we can actually locate: resolved station OR known city centre
     parsed_all = [(m, p) for m, p in parsed_all
                   if p["city"] in _RUN_STATION or p["city"] in CITY_COORDS]
+    # Only spend weather-API budget on cities that have a LIQUID market — there's no
+    # point pulling forecasts for cities too thin to ever bet, and it's what keeps
+    # burning the free daily cap. Cuts calls ~2-3x so Open-Meteo stays uncapped.
+    liquid_cities = {p["city"] for m, p in parsed_all
+                     if float(m.get("volume") or 0) >= VOLUME_FLOOR}
+    if liquid_cities:
+        parsed_all = [(m, p) for m, p in parsed_all if p["city"] in liquid_cities]
     # each city's unit = whatever its markets are quoted in (US=F, else C).
     # If a city somehow has both, prefer F (US markets); consistent per-city in practice.
     units = {}
