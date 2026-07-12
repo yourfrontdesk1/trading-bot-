@@ -460,9 +460,14 @@ def _autopilot():
             pass
         print("caches warmed — dashboard is fast now")
         run_once("startup")
+        # latency arbitrage: wake right after fresh model data lands (~05/11/17/23
+        # UTC) — when the market hasn't repriced yet — instead of a dumb fixed timer.
+        from strategies.weather_edge import seconds_until_next_release
+        from datetime import datetime
         while True:
-            _t.sleep(3 * 3600)   # refresh every 3 hours, hands-off
-            run_once("scheduled refresh")
+            nap = seconds_until_next_release(datetime.utcnow()) + 300  # +5 min for data to publish
+            _t.sleep(max(600, min(nap, 3 * 3600)))   # cap 3h so it still refreshes mid-gap
+            run_once("model-release refresh")
 
     threading.Thread(target=loop, daemon=True).start()
 
