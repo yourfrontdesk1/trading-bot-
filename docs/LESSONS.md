@@ -58,6 +58,24 @@ the range containing it, so for observed temp `t` and threshold `T`:
 - **Fix:** print the live `MEMBER_SIGMA`; grade outcomes with the same
   `T-0.5 <= a < T+0.5` half-open rule as settlement.
 
+## Bug #7 — backtest used the OLD (pre-fix) bucket rule
+- **Symptom:** the calibration backtest validated `[T, T+1)` while the live bot
+  settles on `[T-0.5, T+0.5)` — so it measured a different bucket than we trade.
+- **Fix:** `backtest_weather.py` now imports the canonical `bucket_probability` +
+  `resolves_yes` (single source of truth) and sweeps sigma.
+- **Finding (90 days, 14k points):** Brier 0.054 (well-calibrated — the live "0.273"
+  was 10-bet noise). Best single-forecast sigma ≈ 0.6, but live uses 1.2 → the
+  ensemble path is over-dispersed (per-member sigma double-counts the ensemble
+  spread). Mitigated in practice because the model is only overconfident in the
+  20-50% band, which the dead-zone filter skips; it's well-calibrated on the cheap
+  tails it actually bets. Proper fix needs historical ensembles (unavailable) — so
+  A/B a lower sigma on paper rather than blindly changing a profitable system.
+
+## Measurement blind spot — judged by win-rate, not P&L
+The ledger reported win-rate; the strategy is a cheap-tail (+EV longshot) book that
+wins <50% BY DESIGN. This made a +444%-ROI paper record look like a coin-flip
+failure. Fix: `ledger.bet_pnl` + `stats().net_pnl/roi_pct` — **profit is the metric.**
+
 ## Near-miss #6 — wrong Open-Meteo model id (caught by verifying, not assuming)
 - **What almost happened:** adding ICON to the ensemble, the obvious id `icon_global`
   is **wrong** — Open-Meteo's real id is `icon_global_eps`. A wrong id returns 400
