@@ -371,8 +371,65 @@ def _api_weather_edge():
         return {"error": str(e)[:150], "picks": [], "upcoming": [], "counts": {}, "ledger": {}}
 
 
+def api_week_ahead():
+    return _cached("week_ahead", 3600, _api_week_ahead)
+
+
+def _api_week_ahead():
+    """7-day high-temp outlook (free Met.no) for cities that have temp markets — so
+    you can see the week coming before Polymarket opens each day's market."""
+    import requests
+    from datetime import date, timedelta
+    from concurrent.futures import ThreadPoolExecutor
+    from strategies.weather_edge import parse_question, station_for
+    UA = {"User-Agent": "trading-bot/0.3 leonthick717@gmail.com"}
+    today = date.today()
+    dates = [(today + timedelta(days=i)).isoformat() for i in range(0, 7)]
+    cities = set()
+    try:
+        r = requests.get("https://gamma-api.polymarket.com/markets", params={
+            "active": "true", "closed": "false", "limit": 100,
+            "order": "volume", "ascending": "false"}, timeout=20)
+        for m in r.json():
+            q = m.get("question") or ""
+            if "temperature in" in q.lower():
+                p = parse_question(q)
+                if p:
+                    cities.add(p["city"])
+    except Exception:
+        pass
+
+    def one(city):
+        loc = station_for(city)
+        if not loc:
+            return None
+        lat, lon, _ = loc
+        try:
+            r = requests.get("https://api.met.no/weatherapi/locationforecast/2.0/compact",
+                             params={"lat": round(lat, 3), "lon": round(lon, 3)},
+                             headers=UA, timeout=15)
+            ts = r.json()["properties"]["timeseries"]
+            highs = {}
+            for dt in dates:
+                temps = [t["data"]["instant"]["details"]["air_temperature"]
+                         for t in ts if t["time"].startswith(dt)]
+                highs[dt] = round(max(temps)) if temps else None
+            return {"city": city, "highs": highs}
+        except Exception:
+            return None
+
+    rows = []
+    if cities:
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            for res in ex.map(one, sorted(cities)):
+                if res:
+                    rows.append(res)
+    return {"dates": dates, "rows": rows}
+
+
 ROUTES = {
     "/api/overview": api_overview,
+    "/api/week-ahead": api_week_ahead,
     "/api/signals": api_signals,
     "/api/positions": api_positions,
     "/api/polymarket": api_polymarket,

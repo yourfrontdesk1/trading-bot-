@@ -299,3 +299,10 @@ a.mkt:hover{text-decoration:underline}
 .bar-track{flex:1;background:var(--panel2);border-radius:6px;height:22px;position:relative;overflow:hidden}
 .bar-fill{height:100%;border-radius:6px}
 .bar-val{width:64px;text-align:right;font-weight:600;font-size:13px}
+
+/* Week-ahead forecast table */
+table.wk { border-collapse: collapse; width: 100%; font-size: 14px; margin-top: 6px; }
+table.wk th, table.wk td { padding: 7px 10px; border-bottom: 1px solid rgba(128,128,128,.18); }
+table.wk th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; opacity: .8; }
+table.wk td:first-child, table.wk th:first-child { font-weight: 600; white-space: nowrap; }
+table.wk tbody tr:hover { background: rgba(128,128,128,.06); }

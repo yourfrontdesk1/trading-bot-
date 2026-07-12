@@ -380,6 +380,30 @@ async function loadPredictions() {
   $("#pick-cards").innerHTML = picks.map(pickCard).join("")
     || (rateLimited ? emptyMsg : `<div class="muted">Nothing to break down right now.</div>`);
   $$(".calcin").forEach(calcBet);  // show default £1 calc on every card
+  loadWeekAhead();
+}
+
+async function loadWeekAhead() {
+  const el = $("#week-ahead");
+  try {
+    const d = await get("/api/week-ahead");
+    const dates = d.dates || [], rows = d.rows || [];
+    if (!rows.length) { el.innerHTML = `<div class="muted">No market cities to forecast right now.</div>`; return; }
+    const dayName = iso => new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short" });
+    const head = `<th style="text-align:left">City</th>` +
+      dates.map((dt, i) => `<th>${i === 0 ? "Today" : dayName(dt)}<br><span class="muted" style="font-weight:400">${dt.slice(5)}</span></th>`).join("");
+    const body = rows.map(r => {
+      const cells = dates.map(dt => {
+        const v = r.highs[dt];
+        return `<td style="text-align:center">${v == null ? "—" : v + "°"}</td>`;
+      }).join("");
+      return `<tr><td>${r.city}</td>${cells}</tr>`;
+    }).join("");
+    el.innerHTML = `<div style="overflow-x:auto"><table class="wk"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    $("#week-sub").textContent = `${rows.length} market cities · free Met.no forecast`;
+  } catch (e) {
+    el.innerHTML = `<div class="muted">Couldn't load the week-ahead forecast.</div>`;
+  }
 }
 
 async function loadLab() {
