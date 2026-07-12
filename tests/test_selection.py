@@ -31,7 +31,7 @@ check("healthy candidate is actionable", is_actionable(cand()) is True)
 # ---- liquidity floor (bug #10): below VOLUME_FLOOR is rejected ----
 check("below volume floor rejected", is_actionable(cand(volume=VOLUME_FLOOR - 1)) is False)
 check("at volume floor accepted", is_actionable(cand(volume=VOLUME_FLOOR)) is True)
-check("volume floor was raised above the old 250", VOLUME_FLOOR >= 1000)
+check("volume floor above the old 250 default but below same-day ~$9.9k", 250 < VOLUME_FLOOR < 5000)
 
 # ---- edge thresholds ----
 check("edge below threshold rejected", is_actionable(cand(edge=0.05)) is False)
