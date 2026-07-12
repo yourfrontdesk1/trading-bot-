@@ -52,13 +52,24 @@ def main():
         _log(line); print(line); _notify("Weather bot — no bet today", week)
         return
 
-    b = actionable[0]
-    headline = f"{b.get('best_side')} {b.get('city')} {b.get('threshold_c')}° @ {b.get('p_market')}"
-    line = (f"{ts} | TODAY'S £1 BET: {headline} | model {b.get('model_prob')} "
-            f"edge {b.get('edge')} (src {b.get('data_source')}, {status}) "
-            f"| {b.get('poly_url')} | {week}")
-    _log(line); print(line)
-    _notify("Weather bot — place £1", f"{headline}  (edge {b.get('edge')})")
+    # surface EVERY actionable bet (best edge first), not just the top one
+    actionable.sort(key=lambda r: -(r.get("edge") or 0))
+    _log(f"{ts} | {len(actionable)} BET(S) TODAY ({status}) | {week}")
+    print(f"{ts} | {len(actionable)} bet(s) today:")
+    for b in actionable:
+        headline = f"{b.get('best_side')} {b.get('city')} {b.get('threshold_c')}° @ {b.get('p_market')}"
+        conf = b.get("confidence") or "?"
+        detail = (f"    [{conf} confidence] {headline}\n"
+                  f"       model says {round((b.get('model_prob') or 0)*100)}% vs market "
+                  f"{round((b.get('p_market') or 0)*100)}% -> {round((b.get('edge') or 0)*100)}pt edge "
+                  f"({b.get('members')} forecasts, {b.get('data_source')})\n"
+                  f"       why: {b.get('reasoning', '')}\n"
+                  f"       {b.get('poly_url')}")
+        _log(detail); print(detail)
+    top = actionable[0]
+    _notify(f"Weather bot — {len(actionable)} bet(s) today",
+            f"{top.get('best_side')} {top.get('city')} {top.get('threshold_c')}°"
+            + (f" +{len(actionable)-1} more" if len(actionable) > 1 else ""))
 
 
 if __name__ == "__main__":
