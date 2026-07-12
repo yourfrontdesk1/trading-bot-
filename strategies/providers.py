@@ -10,12 +10,13 @@ None of these need an API key or an account.
 These are used as a resilient FALLBACK when the Open-Meteo ensemble is unavailable
 (e.g. its free daily cap is spent), so the bot keeps producing forecasts 24/7.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import requests
 
 UA = {"User-Agent": "trading-bot/0.3 (leonthick717@gmail.com)"}
 AVIATIONWEATHER = "https://aviationweather.gov/api/data/metar"
+SEVENTIMER = "http://www.7timer.info/bin/api.pl"
 
 
 def _c2f(c):
@@ -108,7 +109,38 @@ def metar_daily(icao, date_iso, is_low, unit="C", hours=72):
         return None
 
 
-DEFAULT_PROVIDERS = (metno_daily, nws_daily)
+def seventimer_daily(lat, lon, date_iso, is_low, unit):
+    """Daily high/low from 7Timer (GFS-based, global, no key, no cap). Its forecast
+    is 3-hourly offsets from an init time; we resolve those to absolute UTC and take
+    the day's extreme. A third independent free source so we don't need Open-Meteo."""
+    try:
+        r = requests.get(SEVENTIMER, params={"lon": round(lon, 3), "lat": round(lat, 3),
+                         "product": "civil", "output": "json"}, headers=UA, timeout=20)
+        r.raise_for_status()
+        js = r.json()
+        init = js.get("init")   # "YYYYMMDDHH" UTC
+        if not init or len(init) < 10:
+            return None
+        base = datetime(int(init[0:4]), int(init[4:6]), int(init[6:8]),
+                        int(init[8:10]), tzinfo=timezone.utc)
+        vals = []
+        for pt in js.get("dataseries", []):
+            t, tp = pt.get("temp2m"), pt.get("timepoint")
+            if t is None or tp is None:
+                continue
+            if (base + timedelta(hours=tp)).strftime("%Y-%m-%d") == date_iso:
+                vals.append(t)
+        if not vals:
+            return None
+        c = min(vals) if is_low else max(vals)
+        return _c2f(c) if unit == "F" else c
+    except Exception:
+        return None
+
+
+# Every free, no-key source, blended into a cross-model ensemble. Met.no + 7Timer
+# are global; NWS adds a third for US cities. No Open-Meteo, no cap, no signup.
+DEFAULT_PROVIDERS = (metno_daily, nws_daily, seventimer_daily)
 
 
 def combine(forecasts):
