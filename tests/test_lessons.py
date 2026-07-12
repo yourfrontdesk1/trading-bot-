@@ -5,6 +5,7 @@ Run: venv/bin/python -m tests.test_lessons   (from repo root)
 """
 from strategies.weather_edge import bet_features, passes_lessons
 from strategies import ledger
+from strategies.ledger import bet_pnl
 
 CASES = []
 
@@ -50,6 +51,19 @@ good = {"station_confirmed": True, "is_exact": False, "lead_days": 1, "side": "Y
 check("selector rejects a learned-loser candidate", passes_lessons(bad, avoid) is False)
 check("selector still accepts a healthy candidate", passes_lessons(good, avoid) is True)
 check("empty lessons never block anything", passes_lessons(bad, []) is True)
+
+
+# ---- P&L: the metric that actually matters for a cheap-tail book ----
+check("cheap-tail winner pays stake*(1-p)/p",
+      abs(bet_pnl({"resolved": True, "won": True, "entry_price": 0.1, "bet_usd": 1.0}) - 9.0) < 1e-9)
+check("loser forfeits the stake",
+      bet_pnl({"resolved": True, "won": False, "entry_price": 0.1, "bet_usd": 1.0}) == -1.0)
+check("unresolved bet -> 0 P&L",
+      bet_pnl({"resolved": False, "won": None, "entry_price": 0.1, "bet_usd": 1.0}) == 0.0)
+# one 9:1 win covers nine 1-unit losses and then some — that's the whole thesis
+check("one 10x winner beats several small losers",
+      bet_pnl({"resolved": True, "won": True, "entry_price": 0.1, "bet_usd": 1.0})
+      + 5 * bet_pnl({"resolved": True, "won": False, "entry_price": 0.1, "bet_usd": 1.0}) > 0)
 
 
 if __name__ == "__main__":

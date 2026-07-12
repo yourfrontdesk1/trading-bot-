@@ -251,6 +251,17 @@ def _load_rows():
     return rows
 
 
+def bet_pnl(r):
+    """Paper P&L of one resolved bet: a maker BUY of `bet_usd` at `entry_price`.
+    Win pays $1/share so profit = stake*(1-p)/p; a loss forfeits the stake. This is
+    THE metric — a cheap-tail strategy wins <50% by design but is +EV via big payouts,
+    so win-rate alone is misleading. Profit is the truth."""
+    p, stake = r.get("entry_price"), r.get("bet_usd") or 0
+    if not p or not stake or not r.get("resolved") or r.get("won") is None:
+        return 0.0
+    return stake * (1 - p) / p if r.get("won") else -stake
+
+
 def stats():
     """Summary of the paper track record so far."""
     if not os.path.exists(LEDGER):
@@ -266,11 +277,18 @@ def stats():
     resolved = [r for r in rows if r.get("resolved")]
     wins = [r for r in resolved if r.get("won")]
     edges = [r["edge"] for r in rows if r.get("edge") is not None]
+    # P&L is THE metric — win-rate is misleading for a cheap-tail (+EV longshot) book.
+    net_pnl = sum(bet_pnl(r) for r in resolved)
+    staked = sum((r.get("bet_usd") or 0) for r in resolved if r.get("won") is not None)
     return {
         "logged": len(rows),
         "resolved": len(resolved),
         "wins": len(wins),
         "win_rate": round(len(wins) / len(resolved) * 100, 1) if resolved else None,
+        "net_pnl": round(net_pnl, 2),
+        "staked": round(staked, 2),
+        "roi_pct": round(net_pnl / staked * 100, 1) if staked else None,
         "avg_edge": round(sum(edges) / len(edges), 3) if edges else None,
-        "note": "Log ~50-100 bets and prove a positive win rate vs entry price before funding.",
+        "note": ("Profit (net_pnl/ROI), not win-rate, is the metric — cheap tails win "
+                 "<50% by design. Need ~50-100 resolved bets to trust it over variance."),
     }
