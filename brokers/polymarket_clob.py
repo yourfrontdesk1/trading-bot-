@@ -55,7 +55,11 @@ def place_maker_bet(token_id: str, price: float, dollars: float):
         return {"placed": False, "reason": f"safe mode ({reason}) — would rest this order", **intent}
 
     # ---- live path (only reached when deliberately armed) ----
-    client = ClobClient(HOST, key=config.POLYMARKET_WALLET_KEY, chain_id=CHAIN_ID)
+    kwargs = {"key": config.POLYMARKET_WALLET_KEY, "chain_id": CHAIN_ID}
+    if config.POLYMARKET_FUNDER:   # MetaMask/browser wallet -> funds in a proxy safe
+        kwargs["signature_type"] = config.POLYMARKET_SIGNATURE_TYPE
+        kwargs["funder"] = config.POLYMARKET_FUNDER
+    client = ClobClient(HOST, **kwargs)
     client.set_api_creds(client.create_or_derive_api_creds())
     order = client.create_order(OrderArgs(
         token_id=token_id, price=price, size=shares, side=BUY))

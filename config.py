@@ -22,6 +22,11 @@ ALPACA_PAPER = _bool("ALPACA_PAPER", True)
 # Polymarket (prediction markets)
 POLYMARKET_WALLET_KEY = os.getenv("POLYMARKET_WALLET_KEY", "")
 POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com"
+# For a MetaMask/browser-wallet Polymarket account, funds sit in a Gnosis-Safe
+# proxy, so the CLOB signs in proxy mode (signature_type=2) with funder = the proxy
+# (your Polymarket deposit) address. Email/Magic accounts use type 1. Direct-EOA = 0.
+POLYMARKET_SIGNATURE_TYPE = int(os.getenv("POLYMARKET_SIGNATURE_TYPE", "2"))
+POLYMARKET_FUNDER = os.getenv("POLYMARKET_FUNDER", "")   # your Polymarket proxy/deposit address
 
 # Weather data. With a paid Open-Meteo key the bot uses the uncapped "customer-"
 # endpoints and runs constantly; without it, the free tier's daily cap applies.
