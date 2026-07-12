@@ -19,7 +19,7 @@ def check(name, cond):
 
 def cand(**kw):
     base = {"edge": 0.15, "model_prob": 0.7, "liquid": True, "volume": 5000,
-            "lead": 1, "side_price": 0.12, "maker_fits": True,
+            "lead": 1, "side_price": 0.12, "maker_fits": True, "members": 31,
             "station_confirmed": True, "is_exact": False, "side": "YES"}
     base.update(kw)
     return base
@@ -36,6 +36,11 @@ check("volume floor was raised above the old 250", VOLUME_FLOOR >= 1000)
 # ---- edge thresholds ----
 check("edge below threshold rejected", is_actionable(cand(edge=0.05)) is False)
 check("edge above sanity cap rejected (stale price)", is_actionable(cand(edge=0.50)) is False)
+
+# ---- coarse fallback (few members) is NEVER actionable, only research ----
+check("single-source fallback (1 member) not actionable", is_actionable(cand(members=1)) is False)
+check("2-source fallback not actionable", is_actionable(cand(members=2)) is False)
+check("full ensemble (31 members) allowed", is_actionable(cand(members=31)) is True)
 
 # ---- dead-zone: a 0.40-0.60 priced side is skipped ----
 check("dead-zone price rejected", is_actionable(cand(side_price=0.50)) is False)

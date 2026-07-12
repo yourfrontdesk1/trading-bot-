@@ -53,6 +53,9 @@ TAIL_MAX_PRICE = 0.15          # a "cheap tail": the winning weather traders con
 MAKER_FEE = 0.0                # resting limit orders are fee-free on Polymarket
 TAKER_FEE_RATE = 0.02          # market orders cost ~feeRate * min(p,1-p); we avoid these
 MIN_SHARES = 5                 # Polymarket minimum order size
+MIN_MEMBERS = 10               # a real bet needs a proper multi-model ensemble; a
+                               # coarse 1-2 source fallback read is research-only,
+                               # NEVER actionable (it invents fake big edges).
 MAX_LEAD_DAYS = 3              # forecasts past ~3 days are too noisy to trust
 MAX_EXPOSURE = 0.6             # never risk more than 60% of bankroll at once
 # TRIMMED to the single 31-member GFS ensemble to stay under the free weather API's
@@ -556,6 +559,8 @@ def is_actionable(c, avoid=()):
         return False
     if c.get("model_prob") is None:
         return False
+    if (c.get("members") or 0) < MIN_MEMBERS:   # coarse fallback read -> research only
+        return False
     if not c.get("liquid") or (c.get("volume") or 0) < VOLUME_FLOOR:
         return False
     if lead is None or not (0 <= lead <= MAX_LEAD_DAYS):
@@ -709,7 +714,7 @@ def build_edge_table(avoid=()):
         blocked_by = sorted(bet_features(feat) & set(avoid or ()))
         candidate = {"edge": pe["edge"], "model_prob": p_yes, "liquid": liquid,
                      "volume": vol, "lead": lead, "side_price": side_price,
-                     "maker_fits": fits, **feat}
+                     "maker_fits": fits, "members": len(members) if members else 0, **feat}
         actionable = is_actionable(candidate, avoid)
 
         ev = m.get("events")
