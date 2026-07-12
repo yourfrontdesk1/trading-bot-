@@ -42,11 +42,10 @@ TRADE_CAP_USD = 2.0
 KELLY_FRACTION = 0.25          # quarter-Kelly
 EDGE_THRESHOLD = 0.08          # only trade if model_prob - price > this
 EDGE_SANITY_CAP = 0.35         # edges above this = stale/illiquid price, not a real edge
-VOLUME_FLOOR = 1000            # drop thin, stale-priced markets. Polymarket temp
-                               # markets top out ~$10k (the $10k floor the pros use is
-                               # Kalshi-scale); measured, temp markets split cleanly into
-                               # a liquid cluster >=$5k and thin junk <$1k, so $1k keeps
-                               # the real books and cuts the stale-price artifacts.
+VOLUME_FLOOR = 500             # near-term temp markets sit ~$990; a $1k floor wrongly
+                               # cut them and kept only the ~$9.9k SAME-DAY markets (the
+                               # gamed ones). $500 keeps the real near-term books while
+                               # still dropping genuinely thin (<$500) junk.
 TAIL_MAX_PRICE = 0.15          # a "cheap tail": the winning weather traders concentrate
                                # here (side priced <=~$0.15) — low hit-rate, big payouts,
                                # +EV at volume. We tag/prioritise these.
@@ -59,7 +58,8 @@ MIN_MEMBERS = 2                # minimum for a real bet: >=2 INDEPENDENT physica
                                # A SINGLE source (1) stays research-only — that's the
                                # artifact case that invents fake edges. 2 = lower
                                # confidence, 3+/full ensemble = higher (shown per card).
-MAX_LEAD_DAYS = 3              # forecasts past ~3 days are too noisy to trust
+MAX_LEAD_DAYS = 4              # trade lead 1-4 days: skip gamed same-day (lead 0),
+                               # extend to 4-day forecasts for more coverage
 MAX_EXPOSURE = 0.6             # never risk more than 60% of bankroll at once
 # TRIMMED to the single 31-member GFS ensemble to stay under the free weather API's
 # DAILY cap so the bot runs all day without going dark. A 3-model blend
@@ -566,7 +566,7 @@ def is_actionable(c, avoid=()):
         return False
     if not c.get("liquid") or (c.get("volume") or 0) < VOLUME_FLOOR:
         return False
-    if lead is None or not (0 <= lead <= MAX_LEAD_DAYS):
+    if lead is None or not (1 <= lead <= MAX_LEAD_DAYS):   # skip gamed same-day (lead 0)
         return False
     if not sp or not (sp <= 0.40 or sp >= 0.60):   # skip the fee/liquidity dead-zone
         return False

@@ -49,6 +49,7 @@ check("cheap side accepted", is_actionable(cand(side_price=0.12)) is True)
 
 # ---- lead time & data presence ----
 check("too-far lead rejected", is_actionable(cand(lead=9)) is False)
+check("same-day (lead 0) rejected — gamed by data-speed traders", is_actionable(cand(lead=0)) is False)
 check("no model_prob rejected", is_actionable(cand(model_prob=None)) is False)
 check("illiquid rejected", is_actionable(cand(liquid=False)) is False)
 check("non-maker-fit rejected", is_actionable(cand(maker_fits=False)) is False)
