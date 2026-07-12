@@ -355,11 +355,14 @@ async function loadPredictions() {
     ? `🧠 Self-learning: Brier ${cal.brier} (lower = sharper). ` +
       cal.buckets.map(b => `predicted ${b.predicted}% → won ${b.actual}%`).join(" · ")
     : (L.note || "");
+  const pnl = L.net_pnl, roi = L.roi_pct;
+  const pnlColor = pnl == null ? "" : (pnl >= 0 ? "color:#16a34a" : "color:#dc2626");
+  const pnlStr = pnl == null ? "—" : (pnl >= 0 ? "+$" + pnl.toFixed(2) : "-$" + Math.abs(pnl).toFixed(2));
   $("#ledger-banner").innerHTML = `
-    <div class="lstat"><div class="k">Bets logged</div><div class="v">${L.logged ?? 0}</div></div>
-    <div class="lstat"><div class="k">Resolved</div><div class="v">${L.resolved ?? 0}</div></div>
-    <div class="lstat"><div class="k">Win rate</div><div class="v">${L.win_rate != null ? L.win_rate + "%" : "—"}</div></div>
-    <div class="lstat"><div class="k">Calibration</div><div class="v">${cal.brier != null ? cal.brier : "—"}</div></div>
+    <div class="lstat"><div class="k">Net P&L (paper)</div><div class="v" style="${pnlColor}">${pnlStr}</div></div>
+    <div class="lstat"><div class="k">ROI</div><div class="v" style="${pnlColor}">${roi != null ? (roi >= 0 ? "+" : "") + roi + "%" : "—"}</div></div>
+    <div class="lstat"><div class="k">Resolved</div><div class="v">${L.resolved ?? 0}<span style="font-size:.6em;opacity:.6"> / ${L.logged ?? 0}</span></div></div>
+    <div class="lstat"><div class="k">Win rate</div><div class="v">${L.win_rate != null ? L.win_rate + "%" : "—"}<span style="font-size:.55em;opacity:.6"> (low=OK)</span></div></div>
     <div class="lnote">${learnNote}</div>`;
   const picks = d.picks || [];
   const rateLimited = d.data_status === "rate_limited";
